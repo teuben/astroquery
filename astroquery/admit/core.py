@@ -97,6 +97,16 @@ class ADMITClass(BaseQuery):
         """
         return get_admit_datafile(result)
 
+    def help(self):
+        """
+        reminders...
+        """
+        print("ADMIT db tables are tagged onto the ALMA tables")
+        print("   alma:      a placeholder for the big alma table")
+        print("   spw:       all SPW's are stored here, with links back to the alma reference")
+        print("   lines:     all lines detected in the SPW's")
+        print("   sources:   all sources detected in each ADMIT LineCube")
+
 
 ADMIT = ADMITClass()
 
