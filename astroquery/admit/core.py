@@ -2,8 +2,8 @@
 """Download ADMIT data"""
 import re
 import os
-# import path
 import sqlite3
+import pickle
 from astropy.table import Table
 from ..query import BaseQuery
 from ..utils import commons, async_to_sync
@@ -23,6 +23,8 @@ class ADMITClass(BaseQuery):
     q = None
     db = None
     c  = None
+    pa = None
+    a  = None
     #  uid|ra|dec|z|object|
     rdz = 'datasetid_ra_dec_redshift_resolvername.txt'
     rdz_lines = None
@@ -42,6 +44,15 @@ class ADMITClass(BaseQuery):
                 print('Checking db....',self.c.total_changes)
             else:
                 print("Did not find ",self.db)
+
+            self.pa = self.q + '/alma.pickle'            
+            if os.path.exists(self.pa):
+                print("Found ",self.pa)
+                self.a = pickle.load(open(self.pa,'rb'))
+                print("ALMA: Found %d entries" % len(self.a))
+            else:
+                print("Did not find ",self.db)
+                
         else:
             print("$ADMIT not in environment. Expecting $ADMIT/query/admit.db")
 
@@ -50,7 +61,7 @@ class ADMITClass(BaseQuery):
         """
         if self.c == None:
             print("database not open yet")
-        for t in ["spw", "lines", "sources", "cont"]:
+        for t in ["header", "alma", "spw", "lines", "sources", "cont"]:
             print("%-10s: %d entries" % (t,len(self.sql("SELECT id from %s" % t))))
 
     def sql(self, command):
