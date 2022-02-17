@@ -2,7 +2,7 @@
 """Download ADMIT data"""
 import re
 import os
-import path
+# import path
 import sqlite3
 from astropy.table import Table
 from ..query import BaseQuery
@@ -19,7 +19,8 @@ class ADMITClass(BaseQuery):
 
     request_url = 'http://admit.astro.umd.edu/query/'
     timeout = 60
-    q  = None
+
+    q = None
     db = None
     c  = None
     #  uid|ra|dec|z|object|
@@ -34,15 +35,35 @@ class ADMITClass(BaseQuery):
         print("kwargs ",kwargs)
         if 'ADMIT' in os.environ:
             self.q = os.environ['ADMIT'] + '/query'
-            self.db = self.q + '/admit.sqlite'
+            self.db = self.q + '/admit.db'
             if os.path.exists(self.db):
                 print("Found ",self.db)
-                c = sqlite3.connect(self.db)
-                print('Checking db....',c.total_changes)
+                self.c = sqlite3.connect(self.db)
+                print('Checking db....',self.c.total_changes)
             else:
                 print("Did not find ",self.db)
         else:
-            print("$ADMIT not in environment. Expecting $ADMIT/query/admit.sqlite")
+            print("$ADMIT not in environment. Expecting $ADMIT/query/admit.db")
+
+    def check(self):
+        """
+        """
+        if self.c == None:
+            print("database not open yet")
+        for t in ["spw", "lines", "sources", "cont"]:
+            print("%-10s: %d entries" % (t,len(self.sql("SELECT id from %s" % t))))
+
+    def sql(self, command):
+        """
+        execute an arbitrary SQL; use with caution
+        only meant for debugging
+        """
+        if False:
+            cur = self.c.cursor()
+            rows = cur.execute(command).fetchall()
+        else:
+            rows = self.c.execute(command).fetchall()
+        return rows
 
     def query_rdz(self, *args, **kwargs):
         """
@@ -101,7 +122,7 @@ class ADMITClass(BaseQuery):
         """
         reminders...
         """
-        print("ADMIT db tables are tagged onto the ALMA tables")
+        print("admit.db contains tables that work with the ALMA table")
         print("   alma:      a placeholder for the big alma table")
         print("   spw:       all SPW's are stored here, with links back to the alma reference")
         print("   lines:     all lines detected in the SPW's")
