@@ -20,11 +20,12 @@ class ADMITClass(BaseQuery):
     request_url = 'http://admit.astro.umd.edu/query/'
     timeout = 60
 
-    q = None
-    db = None
-    c  = None
-    pa = None
-    a  = None
+    q  = None     # root query dir
+    db = None     # admit db name
+    pa = None     # alma pickle name
+    c  = None     # sqlite3 conn
+    a  = None     # alma pandas
+    
     #  uid|ra|dec|z|object|
     rdz = 'datasetid_ra_dec_redshift_resolvername.txt'
     rdz_lines = None
@@ -37,24 +38,42 @@ class ADMITClass(BaseQuery):
         print("kwargs ",kwargs)
         if 'ADMIT' in os.environ:
             self.q = os.environ['ADMIT'] + '/query'
+            # admit sqlite3
             self.db = self.q + '/admit.db'
-            if os.path.exists(self.db):
-                print("Found ",self.db)
-                self.c = sqlite3.connect(self.db)
-                print('Checking db....',self.c.total_changes)
-            else:
-                print("Did not find ",self.db)
-
-            self.pa = self.q + '/alma.pickle'            
-            if os.path.exists(self.pa):
-                print("Found ",self.pa)
-                self.a = pickle.load(open(self.pa,'rb'))
-                print("ALMA: Found %d entries" % len(self.a))
-            else:
-                print("Did not find ",self.db)
-                
+            self.load_admit(self.db)
+            # alma pickle
+            self.pa = self.q + '/alma.pickle'
+            self.load_alma(self.pa)
         else:
             print("$ADMIT not in environment. Expecting $ADMIT/query/admit.db")
+
+    def load_admit(self, admit_db):
+        if os.path.exists(admit_db):
+            print("Found ",admit_db)
+            self.c = sqlite3.connect(admit_db)
+            print('Checking db....',self.c.total_changes)
+        else:
+            print("Did not find ",admit_db)
+        
+    def load_alma(self, alma_pickle):
+        if os.path.exists(alma_pickle):
+            print("Found ",alma_pickle)
+            self.a = pickle.load(open(alma_pickle,'rb'))
+            print("ALMA: Found %d entries" % len(self.a))
+        else:
+            print("Did not find ",alma_pickle)
+
+
+
+
+
+
+
+
+
+
+                
+        
 
     def check(self):
         """
