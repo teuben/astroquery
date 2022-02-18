@@ -7,9 +7,42 @@ import pickle
 from astropy.table import Table
 from ..query import BaseQuery
 from ..utils import commons, async_to_sync
+from ..alma.tapsql import _gen_pos_sql, _gen_str_sql, _gen_numeric_sql,\
+    _gen_band_list_sql, _gen_datetime_sql, _gen_pol_sql, _gen_pub_sql,\
+    _gen_science_sql, _gen_spec_res_sql, ALMA_DATE_FORMAT
 
 __all__ = ['ADMIT', 'ADMITClass']
 
+# This mimics the ALMA_FORM_KEYS in alma/core.py.  The assumption here is
+# that there is a web form in front of this.  We don't have it for ADMIT, but
+# pretending we do means we can follow alma/core.py functions.
+# format is 
+# 'Category' : {
+#  'Attribute1' :[ payload_kw, table_colname, function-for-parsing]
+#  'Attribute2' :[ payload_kw, table_colname, function-for-parsing]
+# }, 
+#
+ADMIT_FORM_KEYS = {
+    'Win': {  
+    # we need "spw.id and sources.spw_id" so put spw in two
+        'Spectral Window': [ 'spw','spw.id', _gen_numeric_sql],
+     },
+    'Lines': {
+        'Spectral Window': [ 'spw','lines.spw_id', _gen_numeric_sql],
+        'Transition': [ 'transition','lines.transition', _gen_str_sql],
+        'Velocity': [ 'velocity','lines.velocity', _gen_numeric_sql],
+        # we are not using this
+        #'Channels': [ 'chan','lines.chan', _gen_numeric_sql],
+     },
+    'Sources': {
+     },
+    'Header': {
+     },
+    'Cont': {
+     },
+    'Alma': {
+     },
+}
 
 @async_to_sync
 class ADMITClass(BaseQuery):
@@ -179,3 +212,27 @@ def find_data_url(result_page):
     if len(re_result) == 0:
         raise ValueError("Results did not contain a result url")
     return re_result[0]
+
+
+def _gen_sql2(payload,sql = 'select * spw,lines,sources'):
+    pass
+
+def _gen_sql(payload):
+    sql = 'select * spw,lines,sources'
+    where = ''
+    if payload:
+        for constraint in payload:
+            for attrib_category in ADMIT_FORM_KEYS.values():
+                for attrib in attrib_category.values():
+                    if constraint in attrib:
+                        # use the value and the second entry in attrib which
+                        # is the new name of the column
+                        val = payload[constraint]
+                        attrib_where = attrib[2](attrib[1], val)
+                        if attrib_where:
+                            if where:
+                                where += ' AND '
+                            else:
+                                where = ' WHERE '
+                            where += attrib_where
+    return sql + where
