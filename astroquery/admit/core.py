@@ -115,11 +115,13 @@ class ADMITClass(BaseQuery):
         """
         query ADMIT
         """
+        # why do we need both?
         print("args   ",args)
         print("kwargs ",kwargs)
-        payload = args[0]
-        payload.update(kwargs)
-        print(_gen_sql(payload))
+        if len(args) != 0:
+            payload = args[0]
+            payload.update(kwargs)
+            print(_gen_sql(payload))
 
     def check(self):
         """
