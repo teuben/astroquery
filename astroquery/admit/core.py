@@ -23,9 +23,14 @@ __all__ = ['ADMIT', 'ADMITClass']
 # }, 
 #
 ADMIT_FORM_KEYS = {
-    'Win': {  
+    'Window': {  
     # we need "spw.id and sources.spw_id" so put spw in two
+        'ALMA ID': ['alma_id','spw.alma_id',_gen_numeric_sql],
         'Spectral Window': [ 'spw','spw.id', _gen_numeric_sql],
+        'Number of Lines': [ 'nlines','spw.nlines', _gen_numeric_sql],
+        'Number of Sources': [ 'nsources','spw.nsources', _gen_numeric_sql],
+        'Number of Channels': [ 'nchan','spw.nchan', _gen_numeric_sql],
+        'RMS noise': [ 'rms','spw.rms', _gen_numeric_sql],
      },
     'Lines': {
         'Spectral Window': [ 'spw','lines.spw_id', _gen_numeric_sql],
@@ -35,12 +40,27 @@ ADMIT_FORM_KEYS = {
         #'Channels': [ 'chan','lines.chan', _gen_numeric_sql],
      },
     'Sources': {
+        'Spectral Window': [ 'spw','sources.spw_id', _gen_numeric_sql],
+        'Line ID': [ 'lines_id','sources.lines_id', _gen_numeric_sql],
+        'RA (Degrees)': ['ra', 'sources.ra',  _gen_numeric_sql],
+        'Dec (Degrees)': ['dec', 'sources.dec',  _gen_numeric_sql],
+        'Flux': ['flux', 'sources.flux',  _gen_numeric_sql],
      },
-    'Header': {
+    'Header': { # no science use case
+        'Key': ['header_key','header.key',_gen_str_sql],
+        'Value': ['header_val','header.val',_gen_str_sql],
      },
     'Cont': {
+        'ALMA ID': ['alma_id','cont.alma_id',_gen_numeric_sql],
+        'Bands': ['band','cont.cont',_gen_str_sql],
+        'Number of Continuum Sources': ['nc_sources','cont.nsources',_gen_numeric_sql],
      },
     'Alma': {
+        'Observation': ['obs_id','alma.obs_id',_gen_str_sql],
+        'Source name': ['source_name','alma.target_name',_gen_str_sql],
+        'Source name': ['source_name','alma.target_name',_gen_str_sql],
+        'RA Dec (Sexagesimal)': ['ra_dec', 'alma.s_ra, alma.s_dec', _gen_pos_sql],
+        'Frequency (GHz)': ['frequency', 'alma.frequency', _gen_numeric_sql],
      },
 }
 
