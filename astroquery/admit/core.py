@@ -117,6 +117,7 @@ class ADMITClass(BaseQuery):
         """
         print("args   ",args)
         print("kwargs ",kwargs)
+        print(_gen_sql(payload))
 
     def check(self):
         """
