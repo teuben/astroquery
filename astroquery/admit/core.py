@@ -83,12 +83,7 @@ class ADMITClass(BaseQuery):
     rdz = 'datasetid_ra_dec_redshift_resolvername.txt'
     rdz_lines = None
 
-    def query(self, *args, **kwargs):
-        """
-        query ADMIT
-        """
-        print("args   ",args)
-        print("kwargs ",kwargs)
+    def __init__(self):
         if 'ADMIT' in os.environ:
             self.q = os.environ['ADMIT'] + '/query'
             # admit sqlite3
@@ -116,17 +111,12 @@ class ADMITClass(BaseQuery):
         else:
             print("Did not find ",alma_pickle)
 
-
-
-
-
-
-
-
-
-
-                
-        
+    def query(self, *args, **kwargs):
+        """
+        query ADMIT
+        """
+        print("args   ",args)
+        print("kwargs ",kwargs)
 
     def check(self):
         """
@@ -234,6 +224,7 @@ def find_data_url(result_page):
     return re_result[0]
 
 
+# maybe we will have a different sql param for inner join
 def _gen_sql2(payload,sql = 'select * spw,lines,sources'):
     pass
 
