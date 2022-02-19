@@ -45,6 +45,9 @@ ADMIT_FORM_KEYS = {
         'RA (Degrees)': ['ra', 'sources.ra',  _gen_numeric_sql],
         'Dec (Degrees)': ['dec', 'sources.dec',  _gen_numeric_sql],
         'Flux': ['flux', 'sources.flux',  _gen_numeric_sql],
+        # source.sn is not actually a table column but we can use it as 
+        # a trigger to munge some sql post-facto.
+        'Signale to Noise': ['sn', 'sources.sn',  _gen_numeric_sql],
      },
     'Header': { # no science use case
         'Key': ['header_key','header.key',_gen_str_sql],
@@ -245,6 +248,10 @@ def _gen_sql(payload):
                         # is the new name of the column
                         val = payload[constraint]
                         attrib_where = attrib[2](attrib[1], val)
+                        # replace sources.sn with '( sources.flux / spw.rms )'
+                        # to compute signal to noise
+                        if 'sources.sn' in attrib_where:
+                            attrib_where = attrib_where.replace('sources.sn','( sources.flux / spw.rms )')
                         if attrib_where:
                             if where:
                                 where += ' AND '
