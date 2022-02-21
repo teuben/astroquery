@@ -5,6 +5,7 @@ import os
 import sqlite3
 import pickle
 from astropy.table import Table
+import pandas as pd
 #from astropy import units as u
 #from astropy.time import Time
 
@@ -189,6 +190,7 @@ class ADMITClass(BaseQuery):
         else:
             sqlq = _gen_sql(kwargs)
             print(sqlq)
+            #return pd.DataFrame(self.sql(sqlq))
             return self.sql(sqlq)
 
     def check(self):
@@ -302,8 +304,9 @@ def _gen_sql2(payload,sql = 'select * from win,lines,sources'):
     pass
 
 
+#@TODO need to add lines.w_id = win.id and sources.w_id = win.id - see notebook.
 def _gen_sql(payload):
-    sql = 'select * from win,lines,sources'
+    sql = 'select * from alma, win,lines,sources'
     where = ''
     if payload:
         for constraint in payload:
