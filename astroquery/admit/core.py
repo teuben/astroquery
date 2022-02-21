@@ -135,18 +135,21 @@ class ADMITClass(BaseQuery):
     rdz = 'datasetid_ra_dec_redshift_resolvername.txt'
     rdz_lines = None
 
-    def __init__(self):
-        if 'ADMIT' in os.environ:
+    def __init__(self,db=None,pickle=False):
+        '''if $ADMIT then we will look for $ADMIT/query/admit.db, otherwise db is full path to database to read '''
+        if 'ADMIT' in os.environ and db is None:
             self.q = os.environ['ADMIT'] + '/query'
             # admit sqlite3
             self.db = self.q + '/admit.db'
             self.load_admit(self.db)
-            # alma pickle
-            self.pa = self.q + '/alma.pickle'
-            self.load_alma(self.pa)
+            # alma pickle, deprecated
+            if pickle:
+                self.pa = self.q + '/alma.pickle'
+                self.load_alma(self.pa)
         else:
-            # @todo reorganize this, allow to set ADMIT after the first failed load 
-            print("$ADMIT not in environment. Expecting $ADMIT/query/admit.db")
+            self.db = db
+            self.load_admit(self.db)
+        self._set_keys()
 
     def load_admit(self, admit_db):
         if os.path.exists(admit_db):
@@ -164,17 +167,26 @@ class ADMITClass(BaseQuery):
         else:
             print("Did not find ",alma_pickle)
 
-    def query(self, *args, **kwargs):
+    def _set_keys(self):
+        #probably a more pythonic way to do this
+        self.keys = list()
+        for attrib_category in ADMIT_FORM_KEYS.values():
+            for attrib in attrib_category.values():
+                #self.keys.append(attrib[1].split(".")[1])
+                self.keys.append(attrib[0])
+
+    def query(self, **kwargs):
         """
         query ADMIT
         """
-        # why do we need both?
-        print("args   ",args)
         print("kwargs ",kwargs)
-        if len(args) != 0:
-            payload = args[0]
-            payload.update(kwargs)
-            print(_gen_sql(payload))
+        if len(kwargs) == 0:
+            raise Exception("You must supply at least one search keyword")
+        bad = set(list(kwargs.keys())) - set(self.keys)
+        if(len(bad)>0):
+            print("WARNING: These keywords are not valid:", bad)
+        else:
+            print(_gen_sql(kwargs))
 
     def check(self):
         """
@@ -285,6 +297,7 @@ def find_data_url(result_page):
 # maybe we will have a different sql param for inner join
 def _gen_sql2(payload,sql = 'select * win,lines,sources'):
     pass
+
 
 def _gen_sql(payload):
     sql = 'select * win,lines,sources'
