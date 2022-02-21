@@ -37,6 +37,7 @@ ADMIT_FORM_KEYS = {
      },
     'Lines': {
         'Spectral Window': [ 'spw','lines.w_id', _gen_numeric_sql],
+        'Formula': [ 'formula','lines.formula', _gen_str_sql],
         'Transition': [ 'transition','lines.transition', _gen_str_sql],
         'Velocity': [ 'velocity','lines.velocity', _gen_numeric_sql],
         # we are not using this
@@ -186,7 +187,9 @@ class ADMITClass(BaseQuery):
         if(len(bad)>0):
             print("WARNING: These keywords are not valid:", bad)
         else:
-            print(_gen_sql(kwargs))
+            sqlq = _gen_sql(kwargs)
+            print(sqlq)
+            return self.sql(sqlq)
 
     def check(self):
         """
@@ -295,12 +298,12 @@ def find_data_url(result_page):
 
 
 # maybe we will have a different sql param for inner join
-def _gen_sql2(payload,sql = 'select * win,lines,sources'):
+def _gen_sql2(payload,sql = 'select * from win,lines,sources'):
     pass
 
 
 def _gen_sql(payload):
-    sql = 'select * win,lines,sources'
+    sql = 'select * from win,lines,sources'
     where = ''
     if payload:
         for constraint in payload:
