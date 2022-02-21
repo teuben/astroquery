@@ -96,6 +96,7 @@ class ADMITClass(BaseQuery):
             self.pa = self.q + '/alma.pickle'
             self.load_alma(self.pa)
         else:
+            # @todo reorganize this, allow to set ADMIT after the first failed load 
             print("$ADMIT not in environment. Expecting $ADMIT/query/admit.db")
 
     def load_admit(self, admit_db):
