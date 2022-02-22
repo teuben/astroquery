@@ -73,11 +73,11 @@ ADMIT_FORM_KEYS = {
         'Key': ['header_key','header.key',_gen_str_sql],
         'Value': ['header_val','header.val',_gen_str_sql],
      },
-    'Cont': {
-        'ALMA ID': ['alma_id','cont.alma_id',_gen_numeric_sql],
-        'Bands': ['band','cont.cont',_gen_str_sql],
-        'Number of continuum sources': ['nc_sources','cont.nsources',_gen_numeric_sql],
-     },
+#    'Cont': {
+#        'ALMA ID': ['alma_id','cont.alma_id',_gen_numeric_sql],
+#        'Bands': ['band','cont.cont',_gen_str_sql],
+#        'Number of continuum sources': ['nc_sources','cont.nsources',_gen_numeric_sql],
+#     },
     'Alma': {
         'Observation': ['obs_id','alma.obs_id',_gen_str_sql],
         # From here below are just a copy of ALMA_FORM_KEYS without the external wrapper dict.
@@ -214,7 +214,7 @@ class ADMITClass(BaseQuery):
         """
         if self.c == None:
             print("database not open yet")
-        for t in ["header", "alma", "win", "lines", "sources", "cont"]:
+        for t in ["header", "alma", "win", "lines", "sources"]:
             print("%-10s: %d entries" % (t,len(self.sql("SELECT id from %s" % t))))
 
     def sql(self, command):
