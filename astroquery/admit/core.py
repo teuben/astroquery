@@ -38,21 +38,29 @@ ADMIT_FORM_KEYS = {
      },
     'Lines': {
         'Spectral Window': [ 'spw','lines.w_id', _gen_numeric_sql],
+        'Rest Frequency': [ 'restfreq','lines.restfreq', _gen_numeric_sql],
         'Formula': [ 'formula','lines.formula', _gen_str_sql],
         'Transition': [ 'transition','lines.transition', _gen_str_sql],
         'Velocity': [ 'velocity','lines.velocity', _gen_numeric_sql],
-        # we are not using this
-        #'Channels': [ 'chan','lines.chan', _gen_numeric_sql],
-     },
+        # would be good to have FWHM or virtual linewidth keyword that is vmax-vmin or something
+        'Minimum Velocity': ['vmin','lines.vmin', _gen_numeric_sql],   
+        'Maximum Velocity': ['vmax','lines.vmin', _gen_numeric_sql],
+        'Moment Zero Flux': ['mom0flux','lines.mom0flux', _gen_numeric_sql],#Jy km/s?
+        'Moment One Peak': ['mom1peak','lines.mom1peak', _gen_numeric_sql],
+        'Moment Two Peak (km/s)': ['mom2peak','lines.mom2peak', _gen_numeric_sql], 
+    },
     'Sources': {
         'Spectral Window': [ 'spw','sources.w_id', _gen_numeric_sql],
         'Line ID': [ 'lines_id','sources.lines_id', _gen_numeric_sql],
         'RA (Degrees)': ['ra', 'sources.ra',  _gen_numeric_sql],
         'Dec (Degrees)': ['dec', 'sources.dec',  _gen_numeric_sql],
         'Flux': ['flux', 'sources.flux',  _gen_numeric_sql],
-        # source.snr is not actually a table column but we can use it as 
-        # a trigger to munge some sql post-facto.
         'Signal to Noise Ratio': ['snr', 'sources.snr',  _gen_numeric_sql],
+        'Peak flux':['peak','sources.peak',_gen_numeric_sql],
+        # this cries out for a source size virtual keyword that is geometric mean of smaj&smin
+        'Source Major Axis':['smaj','sources.smaj',_gen_numeric_sql],    
+        'Source Min Axis':['smin','sources.smin',_gen_numeric_sql],    
+        'Source Beam PA':['spa','sources.spaj',_gen_numeric_sql],  
      },
     'Header': { # no science use case
         'Key': ['header_key','header.key',_gen_str_sql],
@@ -107,6 +115,7 @@ ADMIT_FORM_KEYS = {
         'Project abstract': ['project_abstract', 'alma.proposal_abstract', _gen_str_sql],
         'Publication count': ['publication_count', 'alma.NA', _gen_str_sql],
         'Science keyword': ['science_keyword', 'alma.science_keyword', _gen_str_sql],
+        'Scientific category': ['scientific_category', 'alma.scientific_category', _gen_str_sql],
        # Publication'
         'Bibcode': ['bibcode', 'alma.bib_reference', _gen_str_sql],
         'Title': ['pub_title', 'alma.pub_title', _gen_str_sql],
@@ -304,10 +313,9 @@ def _gen_sql2(payload,sql = 'select * from win,lines,sources'):
     pass
 
 
-#@TODO need to add lines.w_id = win.id and sources.w_id = win.id - see notebook.
 def _gen_sql(payload):
     needs_lines_join = False
-    needs_source_join = False
+    needs_source_join = False # I think we always want this join.
     sql = 'select * from alma inner join win on (win.a_id = alma.id) inner join sources on (sources.w_id = win.id)  '
     join =  ''
     where = ''
@@ -333,8 +341,8 @@ def _gen_sql(payload):
                         # ADMIT virtual keyword
                         #  Replace sources.snr with '( sources.flux / win.rms )'
                         #  to compute signal to noise
-                        if 'sources.snr' in attrib_where:
-                            attrib_where = attrib_where.replace('sources.snr','( sources.flux / win.rms )')
+                        #if 'sources.snr' in attrib_where:
+                        #    attrib_where = attrib_where.replace('sources.snr','( sources.flux / win.rms )')
                         if attrib_where:
                             if where:
                                 where += ' AND '
