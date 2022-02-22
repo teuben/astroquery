@@ -30,24 +30,31 @@ __all__ = ['ADMIT', 'ADMITClass']
 ADMIT_FORM_KEYS = {
     'Window': {  
         'ALMA ID': ['alma_id','win.alma_id',_gen_numeric_sql],
-        'Spectral Window': [ 'spw','win.id', _gen_numeric_sql],
-        'Number of Lines': [ 'nlines','win.nlines', _gen_numeric_sql],
-        'Number of Sources': [ 'nsources','win.nsources', _gen_numeric_sql],
-        'Number of Channels': [ 'nchan','win.nchan', _gen_numeric_sql],
+        'Spectral window': [ 'spw','win.id', _gen_numeric_sql],
+        'Number of lines': [ 'nlines','win.nlines', _gen_numeric_sql],
+        'Number of sources': [ 'nsources','win.nsources', _gen_numeric_sql],
+        'Number of channels': [ 'nchan','win.nchan', _gen_numeric_sql],
         'RMS noise': [ 'rms','win.rms', _gen_numeric_sql],
+        'Beam major axis':['bmaj','win.bmaj',_gen_numeric_sql],    
+        'Beam minor axis':['bmin','win.bmin',_gen_numeric_sql],    
+        'Beam PA':['bpa','win.bpaj',_gen_numeric_sql],  
+        'Frequency center (GHz)':['freqc','win.freqc',_gen_numeric_sql],   
+        'Frequency width (GHz)':['freqw','win.freqw',_gen_numeric_sql],  
+        'LSR Velocity (km/s)':['vlsr','win.vlsr',_gen_numeric_sql],
+        'Frequency coverage?':['fcoverage','win.fcoverage',_gen_numeric_sql],   
      },
     'Lines': {
-        'Spectral Window': [ 'spw','lines.w_id', _gen_numeric_sql],
-        'Rest Frequency': [ 'restfreq','lines.restfreq', _gen_numeric_sql],
+        'Spectral window': [ 'spw','lines.w_id', _gen_numeric_sql],
+        'Rest frequency': [ 'restfreq','lines.restfreq', _gen_numeric_sql],
         'Formula': [ 'formula','lines.formula', _gen_str_sql],
         'Transition': [ 'transition','lines.transition', _gen_str_sql],
         'Velocity': [ 'velocity','lines.velocity', _gen_numeric_sql],
         # would be good to have FWHM or virtual linewidth keyword that is vmax-vmin or something
-        'Minimum Velocity': ['vmin','lines.vmin', _gen_numeric_sql],   
-        'Maximum Velocity': ['vmax','lines.vmin', _gen_numeric_sql],
-        'Moment Zero Flux': ['mom0flux','lines.mom0flux', _gen_numeric_sql],#Jy km/s?
-        'Moment One Peak': ['mom1peak','lines.mom1peak', _gen_numeric_sql],
-        'Moment Two Peak (km/s)': ['mom2peak','lines.mom2peak', _gen_numeric_sql], 
+        'Minimum velocity': ['vmin','lines.vmin', _gen_numeric_sql],   
+        'Maximum velocity': ['vmax','lines.vmin', _gen_numeric_sql],
+        'Moment zero flux': ['mom0flux','lines.mom0flux', _gen_numeric_sql],#Jy km/s?
+        'Moment one peak': ['mom1peak','lines.mom1peak', _gen_numeric_sql],
+        'Moment two peak (km/s)': ['mom2peak','lines.mom2peak', _gen_numeric_sql], 
     },
     'Sources': {
         'Spectral Window': [ 'spw','sources.w_id', _gen_numeric_sql],
@@ -58,9 +65,9 @@ ADMIT_FORM_KEYS = {
         'Signal to Noise Ratio': ['snr', 'sources.snr',  _gen_numeric_sql],
         'Peak flux':['peak','sources.peak',_gen_numeric_sql],
         # this cries out for a source size virtual keyword that is geometric mean of smaj&smin
-        'Source Major Axis':['smaj','sources.smaj',_gen_numeric_sql],    
-        'Source Min Axis':['smin','sources.smin',_gen_numeric_sql],    
-        'Source Beam PA':['spa','sources.spaj',_gen_numeric_sql],  
+        'Source major axis':['smaj','sources.smaj',_gen_numeric_sql],    
+        'Source minor axis':['smin','sources.smin',_gen_numeric_sql],    
+        'Source PA':['spa','sources.spaj',_gen_numeric_sql],  
      },
     'Header': { # no science use case
         'Key': ['header_key','header.key',_gen_str_sql],
@@ -69,7 +76,7 @@ ADMIT_FORM_KEYS = {
     'Cont': {
         'ALMA ID': ['alma_id','cont.alma_id',_gen_numeric_sql],
         'Bands': ['band','cont.cont',_gen_str_sql],
-        'Number of Continuum Sources': ['nc_sources','cont.nsources',_gen_numeric_sql],
+        'Number of continuum sources': ['nc_sources','cont.nsources',_gen_numeric_sql],
      },
     'Alma': {
         'Observation': ['obs_id','alma.obs_id',_gen_str_sql],
