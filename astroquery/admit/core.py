@@ -190,8 +190,8 @@ class ADMITClass(BaseQuery):
         else:
             sqlq = _gen_sql(kwargs)
             print(sqlq)
-            #return pd.DataFrame(self.sql(sqlq))
-            return self.sql(sqlq)
+            return pd.DataFrame(self.sql(sqlq))
+            #return self.sql(sqlq)
 
     def check(self):
         """
@@ -306,13 +306,21 @@ def _gen_sql2(payload,sql = 'select * from win,lines,sources'):
 
 #@TODO need to add lines.w_id = win.id and sources.w_id = win.id - see notebook.
 def _gen_sql(payload):
-    sql = 'select * from alma, win,lines,sources'
+    needs_lines_join = False
+    needs_source_join = False
+    sql = 'select * from alma inner join win on (win.a_id = alma.id) inner join sources on (sources.w_id = win.id)  '
+    join =  ''
     where = ''
     if payload:
         for constraint in payload:
             for attrib_category in ADMIT_FORM_KEYS.values():
                 for attrib in attrib_category.values():
                     if constraint in attrib:
+                        if attrib in ADMIT_FORM_KEYS["Sources"].values():
+                            needs_source_join = True
+                        if attrib in ADMIT_FORM_KEYS["Lines"].values():
+                            needs_lines_join = True
+                            needs_source_join = True     # if we have lines we also have sources                      
                         # use the value and the second entry in attrib which
                         # is the new name of the column
                         val = payload[constraint]
@@ -332,5 +340,12 @@ def _gen_sql(payload):
                                 where += ' AND '
                             else:
                                 where = ' WHERE '
-                            where += attrib_where
+                            where += attrib_where  
+#    if needs_source_join:
+#        join += ' inner join sources on (sources.w_id = win.id) '
+    if needs_lines_join:
+        join += ' inner join lines on (lines.w_id = win.id ) '
+    if join:
+        sql = sql + join
+        
     return sql + where
