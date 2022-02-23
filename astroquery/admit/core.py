@@ -30,7 +30,8 @@ __all__ = ['ADMIT', 'ADMITClass']
 ADMIT_FORM_KEYS = {
     'Window': {  
         'ALMA ID': ['alma_id','win.alma_id',_gen_numeric_sql],
-        'Spectral window': [ 'spw','win.id', _gen_numeric_sql],
+        'Spectral window ID': [ 'win_id','win.id', _gen_numeric_sql],
+        'Spectral window name': [ 'spw','win.spw', _gen_str_sql],
         'Number of lines': [ 'nlines','win.nlines', _gen_numeric_sql],
         'Number of sources': [ 'nsources','win.nsources', _gen_numeric_sql],
         'Number of channels': [ 'nchan','win.nchan', _gen_numeric_sql],
