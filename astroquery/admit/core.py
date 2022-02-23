@@ -121,7 +121,7 @@ ADMIT_FORM_KEYS = {
         'Project title': ['project_title', 'alma.obs_title', _gen_str_sql],
         'PI name': ['pi_name', 'alma.obs_creator_name', _gen_str_sql],
         'Proposal authors': ['proposal_authors', 'alma.proposal_authors', _gen_str_sql],
-        'Project abstract': ['project_abstract', 'alma.proposal_abstract', _gen_str_sql],
+        'Project abstract': ['project_abstract', 'alma.project_abstract', _gen_str_sql],
         'Publication count': ['publication_count', 'alma.NA', _gen_str_sql],
         'Science keyword': ['science_keyword', 'alma.science_keyword', _gen_str_sql],
         'Scientific category': ['scientific_category', 'alma.scientific_category', _gen_str_sql],
