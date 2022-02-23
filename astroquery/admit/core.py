@@ -168,6 +168,7 @@ class ADMITClass(BaseQuery):
             self.db = db
             self.load_admit(self.db)
         self._set_keys()
+        self._set_colnames()
 
     def load_admit(self, admit_db):
         if os.path.exists(admit_db):
@@ -176,7 +177,16 @@ class ADMITClass(BaseQuery):
             print('Checking db....',self.c.total_changes)
         else:
             print("Did not find ",admit_db)
-        
+            
+    def _set_colnames(self):
+        type_dict = {'integer':int, 'float':float, 'text':str} #convert SQL to python type
+        self._colnames = dict()
+        self._coltypes = dict()
+        for tab in ['alma','win','sources','lines','header']:
+            result = self.sql(f"PRAGMA table_info({tab});")
+            self._colnames[tab] = [x[1] for x in result]
+            self._coltypes[tab] = [type_dict[x[2].lower()] for x in result]
+            
     def load_alma(self, alma_pickle):
         if os.path.exists(alma_pickle):
             print("Found ",alma_pickle)
@@ -184,29 +194,41 @@ class ADMITClass(BaseQuery):
             print("ALMA: Found %d entries" % len(self.a))
         else:
             print("Did not find ",alma_pickle)
-
+   
+    @property
+    def key_description(self):
+        return self.ktable
+    
     def _set_keys(self):
         #probably a more pythonic way to do this
         self.keys = list()
+        self._key_description = dict()
         for attrib_category in ADMIT_FORM_KEYS.values():
-            for attrib in attrib_category.values():
+            for attrib_k in attrib_category:
                 #self.keys.append(attrib[1].split(".")[1])
-                self.keys.append(attrib[0])
+                self.keys.append(attrib_category[attrib_k][0])
+                self._key_description[attrib_k] = attrib_category[attrib_k][0]
+        c1 = list(self._key_description.values())
+        c2 = list(self._key_description.keys())
+        self.ktable = Table([c1,c2],names=("Keyword", "Description"))
 
     def query(self, **kwargs):
         """
         query ADMIT
         """
         print("kwargs ",kwargs)
+        # alma and win are always present
+        self._out_colnames = self._colnames['alma'] + self._colnames['win'] + self._colnames['sources'] 
+        self._out_coltypes = self._coltypes['alma'] + self._coltypes['win'] + self._coltypes['sources']
         if len(kwargs) == 0:
             raise Exception("You must supply at least one search keyword")
         bad = set(list(kwargs.keys())) - set(self.keys)
         if(len(bad)>0):
             print("WARNING: These keywords are not valid:", bad)
         else:
-            sqlq = _gen_sql(kwargs)
+            sqlq = self._gen_sql(kwargs)
             print(sqlq)
-            return pd.DataFrame(self.sql(sqlq))
+            return pd.DataFrame(data=self.sql(sqlq),columns=self._out_colnames)
             #return self.sql(sqlq)
 
     def check(self):
@@ -291,9 +313,55 @@ class ADMITClass(BaseQuery):
         print("   win:       all SPW's are stored here, with links back to the alma reference")
         print("   lines:     all lines detected in the SPW's")
         print("   sources:   all sources detected in each ADMIT LineCube")
+        
+    def _gen_sql(self,payload):
+        needs_lines_join = False
+        needs_source_join = False # I think we always want this join.
+        sql = 'select * from alma inner join win on (win.a_id = alma.id) inner join sources on (sources.w_id = win.id)  '
+        join =  ''
+        where = ''
+        if payload:
+            for constraint in payload:
+                for attrib_category in ADMIT_FORM_KEYS.values():
+                    for attrib in attrib_category.values():
+                        if constraint in attrib:
+                            if attrib in ADMIT_FORM_KEYS["Sources"].values():
+                                needs_source_join = True
+                            if attrib in ADMIT_FORM_KEYS["Lines"].values():
+                                needs_lines_join = True
+                                needs_source_join = True     # if we have lines we also have sources                      
+                            # use the value and the second entry in attrib which
+                            # is the new name of the column
+                            val = payload[constraint]
+                            # see astroquery/alma/core.py
+                            if constraint == 'alma.em_resolution':
+                                # em_resolution does not require any transformation
+                                attrib_where = _gen_numeric_sql(constraint, val)
+                            else:
+                                attrib_where = attrib[2](attrib[1], val)
+                            # ADMIT virtual keyword
+                            #  Replace sources.snr with '( sources.flux / win.rms )'
+                            #  to compute signal to noise
+                            #if 'sources.snr' in attrib_where:
+                            #    attrib_where = attrib_where.replace('sources.snr','( sources.flux / win.rms )')
+                            if attrib_where:
+                                if where:
+                                    where += ' AND '
+                                else:
+                                    where = ' WHERE '
+                                where += attrib_where  
+    #    if needs_source_join:
+    #        join += ' inner join sources on (sources.w_id = win.id) '
+        if needs_lines_join:
+            join += ' inner join lines on (lines.w_id = win.id ) '
+            self._out_colnames += self._colnames['lines']
+            self._out_coltypes = self._coltypes['lines']
+        if join:
+            sql = sql + join
 
+        return sql + where
 
-ADMIT = ADMITClass()
+ADMIT = ADMITClass
 
 
 def get_admit_datafile(result, **kwargs):
@@ -315,52 +383,3 @@ def find_data_url(result_page):
     return re_result[0]
 
 
-# maybe we will have a different sql param for inner join
-def _gen_sql2(payload,sql = 'select * from win,lines,sources'):
-    pass
-
-
-def _gen_sql(payload):
-    needs_lines_join = False
-    needs_source_join = False # I think we always want this join.
-    sql = 'select * from alma inner join win on (win.a_id = alma.id) inner join sources on (sources.w_id = win.id)  '
-    join =  ''
-    where = ''
-    if payload:
-        for constraint in payload:
-            for attrib_category in ADMIT_FORM_KEYS.values():
-                for attrib in attrib_category.values():
-                    if constraint in attrib:
-                        if attrib in ADMIT_FORM_KEYS["Sources"].values():
-                            needs_source_join = True
-                        if attrib in ADMIT_FORM_KEYS["Lines"].values():
-                            needs_lines_join = True
-                            needs_source_join = True     # if we have lines we also have sources                      
-                        # use the value and the second entry in attrib which
-                        # is the new name of the column
-                        val = payload[constraint]
-                        # see astroquery/alma/core.py
-                        if constraint == 'alma.em_resolution':
-                            # em_resolution does not require any transformation
-                            attrib_where = _gen_numeric_sql(constraint, val)
-                        else:
-                            attrib_where = attrib[2](attrib[1], val)
-                        # ADMIT virtual keyword
-                        #  Replace sources.snr with '( sources.flux / win.rms )'
-                        #  to compute signal to noise
-                        #if 'sources.snr' in attrib_where:
-                        #    attrib_where = attrib_where.replace('sources.snr','( sources.flux / win.rms )')
-                        if attrib_where:
-                            if where:
-                                where += ' AND '
-                            else:
-                                where = ' WHERE '
-                            where += attrib_where  
-#    if needs_source_join:
-#        join += ' inner join sources on (sources.w_id = win.id) '
-    if needs_lines_join:
-        join += ' inner join lines on (lines.w_id = win.id ) '
-    if join:
-        sql = sql + join
-        
-    return sql + where
