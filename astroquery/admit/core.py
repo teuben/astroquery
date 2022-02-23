@@ -34,14 +34,16 @@ ADMIT_FORM_KEYS = {
         'Number of lines': [ 'nlines','win.nlines', _gen_numeric_sql],
         'Number of sources': [ 'nsources','win.nsources', _gen_numeric_sql],
         'Number of channels': [ 'nchan','win.nchan', _gen_numeric_sql],
-        'RMS noise': [ 'rms','win.rms', _gen_numeric_sql],
+        'Window peak flux': [ 'win_peak','win.peak_w', _gen_numeric_sql],
+        'Window RMS noise': [ 'win_rms','win.rms', _gen_numeric_sql],
+        'Window Signal to noise ratio (peak/rms)': [ 'win_snr','win.snr_w', _gen_numeric_sql],
         'Beam major axis':['bmaj','win.bmaj',_gen_numeric_sql],    
         'Beam minor axis':['bmin','win.bmin',_gen_numeric_sql],    
         'Beam PA':['bpa','win.bpaj',_gen_numeric_sql],  
         'Frequency center (GHz)':['freqc','win.freqc',_gen_numeric_sql],   
         'Frequency width (GHz)':['freqw','win.freqw',_gen_numeric_sql],  
         'LSR Velocity (km/s)':['vlsr','win.vlsr',_gen_numeric_sql],
-        'Frequency coverage?':['fcoverage','win.fcoverage',_gen_numeric_sql],   
+        'Frequency coverage?':['fcoverage','win.fcoverage',_gen_numeric_sql], 
      },
     'Lines': {
         'Spectral window': [ 'spw','lines.w_id', _gen_numeric_sql],
@@ -62,8 +64,8 @@ ADMIT_FORM_KEYS = {
         'RA (Degrees)': ['ra', 'sources.ra',  _gen_numeric_sql],
         'Dec (Degrees)': ['dec', 'sources.dec',  _gen_numeric_sql],
         'Flux': ['flux', 'sources.flux',  _gen_numeric_sql],
-        'Signal to Noise Ratio': ['snr', 'sources.snr',  _gen_numeric_sql],
-        'Peak flux':['peak','sources.peak',_gen_numeric_sql],
+        'Source Signal to noise ratio': ['source_snr', 'sources.snr_s',  _gen_numeric_sql],
+        'Source Peak flux':['source_peak','sources.peak_s',_gen_numeric_sql],
         # this cries out for a source size virtual keyword that is geometric mean of smaj&smin
         'Source major axis':['smaj','sources.smaj',_gen_numeric_sql],    
         'Source minor axis':['smin','sources.smin',_gen_numeric_sql],    
@@ -346,10 +348,10 @@ class ADMITClass(BaseQuery):
                             else:
                                 attrib_where = attrib[2](attrib[1], val)
                             # ADMIT virtual keyword
-                            #  Replace sources.snr with '( sources.flux / win.rms )'
+                            #  Replace win.snr_w with '( win.peak_ / win.rms_w )'
                             #  to compute signal to noise
-                            #if 'sources.snr' in attrib_where:
-                            #    attrib_where = attrib_where.replace('sources.snr','( sources.flux / win.rms )')
+                            if 'win.snr_w' in attrib_where:
+                                attrib_where = attrib_where.replace('win.snr_w','( win.peak_w / win.rms_w )')
                             if attrib_where:
                                 if where:
                                     where += ' AND '
