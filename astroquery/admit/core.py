@@ -165,8 +165,11 @@ class ADMITClass(BaseQuery):
                 self.pa = self.q + '/alma.pickle'
                 self.load_alma(self.pa)
         else:
-            self.db = db
-            self.load_admit(self.db)
+            if db is None:
+                print("No db set yet - use load_admit(...)")
+            else:
+                self.db = db
+                self.load_admit(self.db)
         self._set_keys()
 
     def load_admit(self, admit_db):
@@ -178,6 +181,9 @@ class ADMITClass(BaseQuery):
             print("Did not find ",admit_db)
         
     def load_alma(self, alma_pickle):
+        """
+        deprecated
+        """
         if os.path.exists(alma_pickle):
             print("Found ",alma_pickle)
             self.a = pickle.load(open(alma_pickle,'rb'))
