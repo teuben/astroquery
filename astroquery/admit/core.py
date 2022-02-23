@@ -96,7 +96,7 @@ ADMIT_FORM_KEYS = {
         'Largest angular scale (arcsec)': ['spatial_scale_max',
                                            'alma.spatial_scale_max', _gen_numeric_sql],
         'Field of view (arcsec)': ['fov', 'alma.s_fov', _gen_numeric_sql],
-        # Energy
+        # Energyi
         'Frequency (GHz)': ['frequency', 'alma.frequency', _gen_numeric_sql],
         'Bandwidth (Hz)': ['bandwidth', 'alma.bandwidth', _gen_numeric_sql],
         'Spectral resolution (KHz)': ['spectral_resolution',
@@ -363,8 +363,11 @@ class ADMITClass(BaseQuery):
     #        join += ' inner join sources on (sources.w_id = win.id) '
         if needs_lines_join:
             join += ' inner join lines on (lines.w_id = win.id ) '
+            where += ' AND sources.l_id > 0 ' #linecube
             self._out_colnames += self._colnames['lines']
             self._out_coltypes = self._coltypes['lines']
+        else: 
+            where += ' AND sources.l_id = 0 ' #cubesum
         if join:
             sql = sql + join
 
