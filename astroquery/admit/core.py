@@ -15,7 +15,7 @@ from ..alma.tapsql import _gen_pos_sql, _gen_str_sql, _gen_numeric_sql,\
     _gen_band_list_sql, _gen_datetime_sql, _gen_pol_sql, _gen_pub_sql,\
     _gen_science_sql, _gen_spec_res_sql, ALMA_DATE_FORMAT
 
-__all__ = ['ADMIT', 'ADMITClass']
+__all__ = ['ADMIT', 'ADMITClass','ADMIT_FORM_KEYS']
 
 
 # This mimics the ALMA_FORM_KEYS in alma/core.py.  The assumption here is
@@ -47,7 +47,7 @@ ADMIT_FORM_KEYS = {
         'Frequency coverage?':['fcoverage','win.fcoverage',_gen_numeric_sql], 
      },
     'Lines': {
-        'Spectral window': [ 'spw','lines.w_id', _gen_numeric_sql],
+        'Spectral window ID(L)': [ 'l_win_id','lines.w_id', _gen_numeric_sql],# user should never select on this
         'Rest frequency': [ 'restfreq','lines.restfreq', _gen_numeric_sql],
         'Formula': [ 'formula','lines.formula', _gen_str_sql],
         'Transition': [ 'transition','lines.transition', _gen_str_sql],
@@ -60,7 +60,7 @@ ADMIT_FORM_KEYS = {
         'Moment two peak (km/s)': ['mom2peak','lines.mom2peak', _gen_numeric_sql], 
     },
     'Sources': {
-        'Spectral Window': [ 'spw','sources.w_id', _gen_numeric_sql],
+        'Spectral Window ID(S)': [ 's_win_id','sources.w_id', _gen_numeric_sql], # user should never select on this
         'Line ID': [ 'lines_id','sources.lines_id', _gen_numeric_sql],
         'RA (Degrees)': ['ra', 'sources.ra',  _gen_numeric_sql],
         'Dec (Degrees)': ['dec', 'sources.dec',  _gen_numeric_sql],
@@ -177,6 +177,12 @@ class ADMITClass(BaseQuery):
         self._set_colnames()
 
     def load_admit(self, admit_db):
+        '''Load the local ALMA+ADMIT database.  This method is necessary because the on-line ALMA archive does
+        not yet include ADMIT products.
+        
+        Parameters:
+            admit_db - str. Fully qualified path to database file
+        '''
         if os.path.exists(admit_db):
             print("Found ",admit_db)
             self.c = sqlite3.connect(admit_db)
@@ -185,14 +191,34 @@ class ADMITClass(BaseQuery):
             print("Did not find ",admit_db)
             
     def _set_colnames(self):
+        '''Build the keyword dict and descriptive table'''
         type_dict = {'integer':int, 'float':float, 'text':str} #convert SQL to python type
         self._colnames = dict()
         self._coltypes = dict()
         for tab in ['alma','win','sources','lines','header']:
             result = self.sql(f"PRAGMA table_info({tab});")
             self._colnames[tab] = [x[1] for x in result]
+            # _coltypes not currently used but perhaps helpful
             self._coltypes[tab] = [type_dict[x[2].lower()] for x in result]
             
+    def _set_keys(self):
+        #probably a more pythonic way to do this
+        self.keys = list()
+        self._key_description = dict()
+        dbtable = dict()
+        for attrib_category_key in ADMIT_FORM_KEYS:
+            attrib_category = ADMIT_FORM_KEYS[attrib_category_key]
+            for attrib_k in attrib_category:
+                #self.keys.append(attrib[1].split(".")[1])
+                self.keys.append(attrib_category[attrib_k][0])
+                self._key_description[attrib_k] = attrib_category[attrib_k][0]
+                dbtable[attrib_k] = attrib_category_key
+        c1 = list(self._key_description.values())
+        c2 = list(self._key_description.keys())
+        c3 = list(dbtable.values())
+        print(len(c1),len(c2),len(c3))
+        self.ktable = Table([c1,c2,c3],names=("Keyword", "Description","Database Table"))
+        
     def load_alma(self, alma_pickle):
         """
         deprecated
@@ -206,42 +232,35 @@ class ADMITClass(BaseQuery):
    
     @property
     def key_description(self):
+        '''A table listing the possible keywords for query(), their descriptions, and what subtable they are in.'''
         return self.ktable
     
-    def _set_keys(self):
-        #probably a more pythonic way to do this
-        self.keys = list()
-        self._key_description = dict()
-        for attrib_category in ADMIT_FORM_KEYS.values():
-            for attrib_k in attrib_category:
-                #self.keys.append(attrib[1].split(".")[1])
-                self.keys.append(attrib_category[attrib_k][0])
-                self._key_description[attrib_k] = attrib_category[attrib_k][0]
-        c1 = list(self._key_description.values())
-        c2 = list(self._key_description.keys())
-        self.ktable = Table([c1,c2],names=("Keyword", "Description"))
-
     def query(self, **kwargs):
         """
-        query ADMIT
+        Submit a query to the ALMA+ADMIT database. 
+        Parameters:
+            kwargs - string values for any keyword available in ADMIT.keys.
+            Values MUST be strings, even if the underlying table column is number.  e.g.
+            mom0flux='>0'  not mom0flux>0
+        Returns: pandas DataFrame containing the search results table.
         """
         print("kwargs ",kwargs)
         # alma and win are always present
-        self._out_colnames = self._colnames['alma'] + self._colnames['win'] + self._colnames['sources'] 
-        self._out_coltypes = self._coltypes['alma'] + self._coltypes['win'] + self._coltypes['sources']
+        self._out_colnames = self._colnames['alma'] + self._colnames['win'] 
+        self._out_coltypes = self._coltypes['alma'] + self._coltypes['win'] 
         if len(kwargs) == 0:
             raise Exception("You must supply at least one search keyword")
         bad = set(list(kwargs.keys())) - set(self.keys)
         if(len(bad)>0):
-            print("WARNING: These keywords are not valid:", bad)
+            raise Exception(f"Unrecognized keywords: {bad}")
         else:
             sqlq = self._gen_sql(kwargs)
             print(sqlq)
             return pd.DataFrame(data=self.sql(sqlq),columns=self._out_colnames)
-            #return self.sql(sqlq)
 
     def check(self):
         """
+        Internal check
         """
         if self.c == None:
             print("database not open yet")
@@ -250,8 +269,9 @@ class ADMITClass(BaseQuery):
 
     def sql(self, command):
         """
-        execute an arbitrary SQL; use with caution
-        only meant for debugging
+        Execute an arbitrary SQL; use with caution.
+        Only meant for debugging
+        Returns: list of lists of SQL result.
         """
         if False:
             cur = self.c.cursor()
@@ -324,9 +344,15 @@ class ADMITClass(BaseQuery):
         print("   sources:   all sources detected in each ADMIT LineCube")
         
     def _gen_sql(self,payload):
+        '''Transform the user keywords into an SQL string'''
+        # Query joins alma and win tables always.
+        sql = 'select * from alma inner join win on (win.a_id = alma.id) '
+        # We may join sources table or lines table depending on what keywords the user invokes
         needs_lines_join = False
-        needs_source_join = False # I think we always want this join.
-        sql = 'select * from alma inner join win on (win.a_id = alma.id) inner join sources on (sources.w_id = win.id)  '
+        needs_source_join = False 
+        join_s = ' inner join sources on (sources.w_id = win.id)  '
+        join_l = ' inner join lines on (lines.w_id = win.id ) '
+        # Default is no additional joins
         join =  ''
         where = ''
         if payload:
@@ -334,21 +360,21 @@ class ADMITClass(BaseQuery):
                 for attrib_category in ADMIT_FORM_KEYS.values():
                     for attrib in attrib_category.values():
                         if constraint in attrib:
+                            # Set triggers for additional joins as needed
                             if attrib in ADMIT_FORM_KEYS["Sources"].values():
                                 needs_source_join = True
                             if attrib in ADMIT_FORM_KEYS["Lines"].values():
-                                needs_lines_join = True
-                                needs_source_join = True     # if we have lines we also have sources                      
+                                needs_lines_join = True                     
                             # use the value and the second entry in attrib which
                             # is the new name of the column
                             val = payload[constraint]
-                            # see astroquery/alma/core.py
+                            # em_resolution is special-cased. see astroquery/alma/core.py
                             if constraint == 'alma.em_resolution':
                                 # em_resolution does not require any transformation
                                 attrib_where = _gen_numeric_sql(constraint, val)
                             else:
                                 attrib_where = attrib[2](attrib[1], val)
-                            # ADMIT virtual keyword
+                            # Example of ADMIT virtual keyword
                             #  Replace win.snr_w with '( win.peak_ / win.rms_w )'
                             #  to compute signal to noise
                             if 'win.snr_w' in attrib_where:
@@ -359,15 +385,30 @@ class ADMITClass(BaseQuery):
                                 else:
                                     where = ' WHERE '
                                 where += attrib_where  
-    #    if needs_source_join:
-    #        join += ' inner join sources on (sources.w_id = win.id) '
+        ############################################################################
+        # Do whatever additional joins are ncessary based on the triggers above.
+        # The order of the join matters so that we get the column names correct and
+        # the user always gets them in the same order.
+        # We should always join in this order:
+        # ALMA, WIN, [SOURCES], [LINES]
+        ############################################################################
+        if needs_source_join:
+            join += join_s 
+            self._out_colnames += self._colnames['sources']
+            self._out_coltypes = self._coltypes['sources']
         if needs_lines_join:
-            join += ' inner join lines on (lines.w_id = win.id ) '
-            where += ' AND sources.l_id > 0 ' #linecube
+            join += join_l 
             self._out_colnames += self._colnames['lines']
             self._out_coltypes = self._coltypes['lines']
-        else: 
-            where += ' AND sources.l_id = 0 ' #cubesum
+            if needs_source_join: 
+                # Do not move this to the if needs_sources_join above.
+                # Order matters.  We should never have both sources.l_id=0 and sources.l_id>0
+                where += ' AND sources.l_id > 0 ' #include cubesum results
+        else:
+            # Do not move this to the if needs_sources_join above. 
+            # Order matters.  We should never have both sources.l_id=0 and sources.l_id>0
+            if needs_source_join:
+                where += ' AND sources.l_id = 0 ' #include linecube results
         if join:
             sql = sql + join
 
