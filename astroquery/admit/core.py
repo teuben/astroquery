@@ -181,6 +181,7 @@ class ADMITClass(BaseQuery):
                 self.load_admit(self.db)
         self._set_keys()
         self._set_colnames()
+        print(self.report_version())
     
     def report_version(self):
         return f"Database version: {self.database_version}. core.py version: {version()}"
@@ -261,7 +262,7 @@ class ADMITClass(BaseQuery):
             mom0flux='>0'  not mom0flux>0
         Returns: pandas DataFrame containing the search results table.
         """
-        print("kwargs ",kwargs)
+        #print("kwargs ",kwargs)
         # alma and win are always present
         self._out_colnames = self._colnames['alma'] + self._colnames['win'] 
         self._out_coltypes = self._coltypes['alma'] + self._coltypes['win'] 
@@ -272,7 +273,7 @@ class ADMITClass(BaseQuery):
             raise Exception(f"Unrecognized keywords: {bad}")
         else:
             sqlq = self._gen_sql(kwargs)
-            print(sqlq)
+            print(sqlq,"\n")
             return pd.DataFrame(data=self.sql(sqlq),columns=self._out_colnames)
 
     def check(self):
