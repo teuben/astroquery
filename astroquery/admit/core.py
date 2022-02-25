@@ -19,7 +19,9 @@ from ..alma.tapsql import _gen_pos_sql, _gen_str_sql, _gen_numeric_sql,\
 __all__ = ['ADMIT', 'ADMITClass','ADMIT_FORM_KEYS']
         
 
-
+__version__ = "2022-March-03"
+def version():
+    return __version__
 
 # This mimics the ALMA_FORM_KEYS in alma/core.py.  The assumption here is
 # that there is a web form in front of this.  We don't have it for ADMIT, but
@@ -179,7 +181,18 @@ class ADMITClass(BaseQuery):
                 self.load_admit(self.db)
         self._set_keys()
         self._set_colnames()
+    
+    def report_version(self):
+        return f"Database version: {self.database_version}. core.py version: {version()}"
 
+    @property
+    def database_version(self):
+        h = self.sql("select * from header;")
+        hd = dict()
+        for kv in h:
+            hd[kv[1]] = kv[2]
+        return hd['version']
+    
     def load_admit(self, admit_db):
         '''Load the local ALMA+ADMIT database.  This method is necessary because the on-line ALMA archive does
         not yet include ADMIT products.
@@ -222,9 +235,7 @@ class ADMITClass(BaseQuery):
         c3 = list(dbtable.values())
         print(len(c1),len(c2),len(c3))
         self.ktable = Table([c1,c2,c3],names=("Keyword", "Description","Database Table"))
-
-
-        
+     
     def load_alma(self, alma_pickle):
         """
         deprecated
