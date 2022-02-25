@@ -6,7 +6,8 @@ import sqlite3
 import pickle
 from astropy.table import Table
 import pandas as pd
-#from astropy import units as u
+from astropy import units as u
+from astropy.coordinates import SkyCoord
 #from astropy.time import Time
 
 from ..query import BaseQuery
@@ -16,6 +17,8 @@ from ..alma.tapsql import _gen_pos_sql, _gen_str_sql, _gen_numeric_sql,\
     _gen_science_sql, _gen_spec_res_sql, ALMA_DATE_FORMAT
 
 __all__ = ['ADMIT', 'ADMITClass','ADMIT_FORM_KEYS']
+        
+
 
 
 # This mimics the ALMA_FORM_KEYS in alma/core.py.  The assumption here is
@@ -71,6 +74,7 @@ ADMIT_FORM_KEYS = {
         'Source major axis':['smaj','sources.smaj',_gen_numeric_sql],    
         'Source minor axis':['smin','sources.smin',_gen_numeric_sql],    
         'Source PA':['spa','sources.spaj',_gen_numeric_sql],  
+        'Search Region':['region','sources.region',None],# special case where we will parse internally
      },
     'Header': { # no science use case
         'Key': ['header_key','header.key',_gen_str_sql],
@@ -218,6 +222,8 @@ class ADMITClass(BaseQuery):
         c3 = list(dbtable.values())
         print(len(c1),len(c2),len(c3))
         self.ktable = Table([c1,c2,c3],names=("Keyword", "Description","Database Table"))
+
+
         
     def load_alma(self, alma_pickle):
         """
@@ -343,6 +349,21 @@ class ADMITClass(BaseQuery):
         print("   lines:     all lines detected in the SPW's")
         print("   sources:   all sources detected in each ADMIT LineCube")
         
+    def _parse_region(self,region):
+        ''' get a square region centered on ra, dec '''
+        c = region[0]
+        size = region[1]
+        if not isinstance(c,SkyCoord):
+            raise ValueError("RA_DEC region value must be astropy SkyCoord")
+        if not isinstance(size,u.Quantity):
+            raise ValueError("SIZE region value must be astropy Quantities")
+        ra_min = c.ra - size.to("degree")
+        ra_max = c.ra + size.to("degree")
+        dec_min = c.dec - size.to("degree")
+        dec_max = c.dec + size.to("degree")
+        sql = f" sources.ra > {ra_min.to('degree').value} AND sources.ra < {ra_max.to('degree').value} AND sources.dec > {dec_min.to('degree').value} AND sources.dec < {dec_max.to('degree').value} "
+        return sql  
+    
     def _gen_sql(self,payload):
         '''Transform the user keywords into an SQL string'''
         # Query joins alma and win tables always.
@@ -368,10 +389,14 @@ class ADMITClass(BaseQuery):
                             # use the value and the second entry in attrib which
                             # is the new name of the column
                             val = payload[constraint]
+                            #print(constraint)
                             # em_resolution is special-cased. see astroquery/alma/core.py
-                            if constraint == 'alma.em_resolution':
+                            # i think this is a bug in alma/core.py should be 'spectral_resolution'
+                            if constraint == 'alma.em_resolution': 
                                 # em_resolution does not require any transformation
                                 attrib_where = _gen_numeric_sql(constraint, val)
+                            elif constraint == "region":
+                                attrib_where = self._parse_region(val)
                             else:
                                 attrib_where = attrib[2](attrib[1], val)
                             # Example of ADMIT virtual keyword
