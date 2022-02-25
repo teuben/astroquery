@@ -7,4 +7,4 @@ Access to ADMIT data, locally maintained on disk
 :author: Peter Teuben <teuben@umd.edu>
 """
 
-from .core import ADMIT
+from .core import ADMIT, ADMIT_FORM_KEYS, version
