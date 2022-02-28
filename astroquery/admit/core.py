@@ -19,7 +19,8 @@ from ..alma.tapsql import _gen_pos_sql, _gen_str_sql, _gen_numeric_sql,\
 __all__ = ['ADMIT', 'ADMITClass','ADMIT_FORM_KEYS']
         
 
-__version__ = "2022-March-03"
+__version__ = "26-feb-2022"
+
 def version():
     return __version__
 
@@ -155,14 +156,15 @@ class ADMITClass(BaseQuery):
     q  = None     # root query dir
     db = None     # admit db name
     pa = None     # alma pickle name
-    c  = None     # sqlite3 conn
     a  = None     # alma pandas
+    c  = None     # sqlite3 conn to admit.db
+    ca = None     # sqlite3 conn to alma.db
     
     #  uid|ra|dec|z|object|
     rdz = 'datasetid_ra_dec_redshift_resolvername.txt'
     rdz_lines = None
 
-    def __init__(self,db=None,pickle=False):
+    def __init__(self,db=None,pickle=False, alma=False):
         '''if $ADMIT then we will look for $ADMIT/query/admit.db, otherwise db is full path to database to read '''
         if 'ADMIT' in os.environ and db is None:
             self.q = os.environ['ADMIT'] + '/query'
@@ -207,6 +209,22 @@ class ADMITClass(BaseQuery):
             print('Checking db....',self.c.total_changes)
         else:
             print("Did not find ",admit_db)
+
+    def load_alma(self, alma_db):
+        '''Load the local pure ALMA database.  This is a fallback method, only for debugging
+        since the ADMIT database include an (albeit smaller) ALMA table.
+        
+        Parameters:
+            alma_db - str. Fully qualified path to database file
+        '''
+        if os.path.exists(alma_db):
+            print("Found ",alma_db)
+            self.ca = sqlite3.connect(alma_db)
+            print('Checking db....',self.ca.total_changes)
+            print("Found %d entries" % len(self.sqla("SELECT obs_id from alma")))
+            
+        else:
+            print("Did not find ",alma_db)
             
     def _set_colnames(self):
         '''Build the keyword dict and descriptive table'''
@@ -237,7 +255,7 @@ class ADMITClass(BaseQuery):
         print(len(c1),len(c2),len(c3))
         self.ktable = Table([c1,c2,c3],names=("Keyword", "Description","Database Table"))
      
-    def load_alma(self, alma_pickle):
+    def load_alma_pickle(self, alma_pickle):
         """
         deprecated
         """
@@ -297,6 +315,18 @@ class ADMITClass(BaseQuery):
         else:
             rows = self.c.execute(command).fetchall()
         return rows
+
+    def sqla(self, command):
+        """
+        Execute an arbitrary SQL on the pure ALMA table; use with caution.
+        Only meant for debugging
+        For other experiments the alma.pickle approach, which contains
+        the alma table as a panda's DataFrame, may be more efficient.
+        Plus, there is always
+            pd.read_sql('SELECT * FROM alma', self.ac)
+        Returns: list of lists of SQL result.
+        """
+        return self.ca.execute(command).fetchall()
 
     def query_rdz(self, *args, **kwargs):
         """
