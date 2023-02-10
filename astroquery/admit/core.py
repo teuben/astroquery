@@ -164,8 +164,10 @@ class ADMITClass(BaseQuery):
     rdz = 'datasetid_ra_dec_redshift_resolvername.txt'
     rdz_lines = None
 
-    def __init__(self,db=None,pickle=False, alma=False):
+    def __init__(self,db=None,pickle=False, alma=False,check_same_thread=True):
         '''if $ADMIT then we will look for $ADMIT/query/admit.db, otherwise db is full path to database to read '''
+        # use check_same_thread=False if in a web app or you get an error.
+        self.check_same_thread = check_same_thread
         if 'ADMIT' in os.environ and db is None:
             self.q = os.environ['ADMIT'] + '/query'
             # admit sqlite3
@@ -205,7 +207,8 @@ class ADMITClass(BaseQuery):
         '''
         if os.path.exists(admit_db):
             print("Found ",admit_db)
-            self.c = sqlite3.connect(admit_db)
+            self.c = sqlite3.connect(admit_db,
+                                     check_same_thread=self.check_same_thread)
             print('Checking db....',self.c.total_changes)
         else:
             print("Did not find ",admit_db)
