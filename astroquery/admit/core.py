@@ -19,7 +19,7 @@ from ..alma.tapsql import _gen_pos_sql, _gen_str_sql, _gen_numeric_sql,\
 __all__ = ['ADMIT', 'ADMITClass','ADMIT_FORM_KEYS']
         
 
-__version__ = "26-feb-2022"
+__version__ = "27-feb-2023"
 
 def version():
     return __version__
@@ -37,7 +37,8 @@ ADMIT_FORM_KEYS = {
     'Window': {  
         'ALMA ID': ['alma_id','win.alma_id',_gen_numeric_sql],
         'Spectral window ID': [ 'win_id','win.id', _gen_numeric_sql],
-        'Spectral window name': [ 'spw','win.spw', _gen_str_sql],
+        'Spectral window name': [ 'spw','win.spw', _gen_str_sql], 
+        'Band number': [ 'bandnum','win.bandnum', _gen_numeric_sql], #LMT
         'Number of lines': [ 'nlines','win.nlines', _gen_numeric_sql],
         'Number of sources': [ 'nsources','win.nsources', _gen_numeric_sql],
         'Number of channels': [ 'nchan','win.nchan', _gen_numeric_sql],
@@ -51,6 +52,7 @@ ADMIT_FORM_KEYS = {
         'Frequency width (GHz)':['freqw','win.freqw',_gen_numeric_sql],  
         'LSR Velocity (km/s)':['vlsr','win.vlsr',_gen_numeric_sql],
         'Frequency coverage?':['fcoverage','win.fcoverage',_gen_numeric_sql], 
+        'QA Grade': ['qagrade','win.qagrade',_gen_str_sql], # LMT only
      },
     'Lines': {
         'Spectral window ID(L)': [ 'l_win_id','lines.w_id', _gen_numeric_sql],# user should never select on this
@@ -76,7 +78,7 @@ ADMIT_FORM_KEYS = {
         # this cries out for a source size virtual keyword that is geometric mean of smaj&smin
         'Source major axis':['smaj','sources.smaj',_gen_numeric_sql],    
         'Source minor axis':['smin','sources.smin',_gen_numeric_sql],    
-        'Source PA':['spa','sources.spaj',_gen_numeric_sql],  
+        'Source PA':['spa','sources.spa',_gen_numeric_sql],  
         'Search Region':['region','sources.region',None],# special case where we will parse internally
      },
     'Header': { # no science use case
@@ -90,6 +92,10 @@ ADMIT_FORM_KEYS = {
 #     },
     'Alma': {
         'Observation': ['obs_id','alma.obs_id',_gen_str_sql],
+        'Observatory': ['observatory','alma.observatory',_gen_str_sql], #LMT only?
+        'Obsnum': ['obsnum','alma.obsnum',_gen_numeric_sql], # LMT only
+        'Instrument': ['instrument','alma.instrument',_gen_str_sql], # LMT only
+        'Calibration Status': ['calibration_status','alma.calibration_status',_gen_str_sql], # LMT only
         # From here below are just a copy of ALMA_FORM_KEYS without the external wrapper dict.
         # Position
         'Source name (astropy Resolver)': ['source_name_resolver',
