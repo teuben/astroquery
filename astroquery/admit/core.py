@@ -96,6 +96,7 @@ ADMIT_FORM_KEYS = {
         'Obsnum': ['obsnum','alma.obsnum',_gen_numeric_sql], # LMT only
         'Instrument': ['instrument','alma.instrument',_gen_str_sql], # LMT only
         'Calibration Status': ['calibration_status','alma.calibration_status',_gen_str_sql], # LMT only
+        'Target Region':['target_region','alma.region',None],# LMT ONLY since no sources table -special case where we will parse internally
         # From here below are just a copy of ALMA_FORM_KEYS without the external wrapper dict.
         # Position
         'Source name (astropy Resolver)': ['source_name_resolver',
@@ -104,6 +105,7 @@ ADMIT_FORM_KEYS = {
         'RA Dec (Sexagesimal)': ['ra_dec', 'alma.s_ra, alma.s_dec', _gen_pos_sql],
         'Galactic (Degrees)': ['galactic', 'alma.gal_longitude, alma.gal_latitude',
                                _gen_pos_sql],
+        'Source Velocity': ['s_velocity','alma.s_velocity',_gen_numeric_sql], # LMT only
         'Angular resolution (arcsec)': ['spatial_resolution',
                                         'alma.spatial_resolution', _gen_numeric_sql],
         'Largest angular scale (arcsec)': ['spatial_scale_max',
@@ -202,7 +204,7 @@ class ADMITClass(BaseQuery):
         hd = dict()
         for kv in h:
             hd[kv[1]] = kv[2]
-        return hd['version']
+        return hd.get('version',"No version info")
     
     def load_admit(self, admit_db):
         '''Load the local ALMA+ADMIT database.  This method is necessary because the on-line ALMA archive does
@@ -400,7 +402,7 @@ class ADMITClass(BaseQuery):
         print("   lines:     all lines detected in the SPW's")
         print("   sources:   all sources detected in each ADMIT LineCube")
         
-    def _parse_region(self,region):
+    def _parse_region(self,region,constraint):
         ''' get a square region centered on ra, dec '''
         c = region[0]
         size = region[1]
@@ -412,7 +414,13 @@ class ADMITClass(BaseQuery):
         ra_max = c.ra + size.to("degree")
         dec_min = c.dec - size.to("degree")
         dec_max = c.dec + size.to("degree")
-        sql = f" sources.ra > {ra_min.to('degree').value} AND sources.ra < {ra_max.to('degree').value} AND sources.dec > {dec_min.to('degree').value} AND sources.dec < {dec_max.to('degree').value} "
+        if constraint == "region":
+            sql = f" sources.ra > {ra_min.to('degree').value} AND sources.ra < {ra_max.to('degree').value} AND sources.dec > {dec_min.to('degree').value} AND sources.dec < {dec_max.to('degree').value} "
+# Hack for LMT since we don't put s_ra into sources.ra
+        elif constraint == "target_region":
+            sql = f" alma.s_ra > {ra_min.to('degree').value} AND alma.s_ra < {ra_max.to('degree').value} AND alma.s_dec > {dec_min.to('degree').value} AND alma.s_dec < {dec_max.to('degree').value} "
+        else:
+            raise KeyError(f"Unrecognized constraint in region search: {constraint}")
         return sql  
     
     def _gen_sql(self,payload):
@@ -434,8 +442,10 @@ class ADMITClass(BaseQuery):
                         if constraint in attrib:
                             # Set triggers for additional joins as needed
                             if attrib in ADMIT_FORM_KEYS["Sources"].values():
+                                print("source join attrib ",attrib)
                                 needs_source_join = True
                             if attrib in ADMIT_FORM_KEYS["Lines"].values():
+                                print("line join attrib ",attrib)
                                 needs_lines_join = True                     
                             # use the value and the second entry in attrib which
                             # is the new name of the column
@@ -446,8 +456,8 @@ class ADMITClass(BaseQuery):
                             if constraint == 'alma.em_resolution': 
                                 # em_resolution does not require any transformation
                                 attrib_where = _gen_numeric_sql(constraint, val)
-                            elif constraint == "region":
-                                attrib_where = self._parse_region(val)
+                            elif constraint == "region" or constraint=="target_region":
+                                attrib_where = self._parse_region(val,constraint)
                             else:
                                 attrib_where = attrib[2](attrib[1], val)
                             # Example of ADMIT virtual keyword
