@@ -93,7 +93,8 @@ ADMIT_FORM_KEYS = {
     'Alma': {
         'Observation': ['obs_id','alma.obs_id',_gen_str_sql],
         'Observatory': ['observatory','alma.observatory',_gen_str_sql], #LMT only?
-        'Obsnum': ['obsnum','alma.obsnum',_gen_numeric_sql], # LMT only
+        'Obsnum': ['obsnum','alma.obsnum',_gen_str_sql], # LMT only
+        'ObsnumList': ['obsnum','alma.obsnumlist',_gen_str_sql], # LMT only
         'Instrument': ['instrument','alma.instrument',_gen_str_sql], # LMT only
         'Calibration Status': ['calibration_status','alma.calibration_status',_gen_str_sql], # LMT only
         'Target Region':['target_region','alma.region',None],# LMT ONLY since no sources table -special case where we will parse internally
