@@ -464,10 +464,10 @@ class ADMITClass(BaseQuery):
                         if constraint in attrib:
                             # Set triggers for additional joins as needed
                             if attrib in ADMIT_FORM_KEYS["Sources"].values():
-                                print("source join attrib ",attrib)
+                                #print("source join attrib ",attrib)
                                 needs_source_join = True
                             if attrib in ADMIT_FORM_KEYS["Lines"].values():
-                                print("line join attrib ",attrib)
+                                #print("line join attrib ",attrib)
                                 needs_lines_join = True                     
                             # use the value and the second entry in attrib which
                             # is the new name of the column
@@ -483,7 +483,7 @@ class ADMITClass(BaseQuery):
                             # handle joint query of obsnum and obsnumlist
                             elif "obsnum" in constraint:
                                 attrib_where = self._parse_obsnum(constraint,val)
-                                print(f"Obsnum search got: {attrib_where}")
+                                #print(f"Obsnum search got: {attrib_where}")
                             else:
                                 #attrib[2] is function for parsing
                                 #attrib[1] is alma table column name
