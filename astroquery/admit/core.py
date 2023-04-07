@@ -32,7 +32,7 @@ def version():
 #  'Attribute1' :[ payload_kw, table_colname, function-for-parsing]
 #  'Attribute2' :[ payload_kw, table_colname, function-for-parsing]
 # }, 
-#
+# and function-for-parsing result is written to attrib_where below.
 ADMIT_FORM_KEYS = {
     'Window': {  
         'ALMA ID': ['alma_id','win.alma_id',_gen_numeric_sql],
@@ -93,8 +93,8 @@ ADMIT_FORM_KEYS = {
     'Alma': {
         'Observation': ['obs_id','alma.obs_id',_gen_str_sql],
         'Observatory': ['observatory','alma.observatory',_gen_str_sql], #LMT only?
-        'Obsnum': ['obsnum','alma.obsnum',_gen_str_sql], # LMT only
-        'ObsnumList': ['obsnumlist','alma.obsnumlist',_gen_str_sql], # LMT only
+        'Obsnum': ['obsnum','alma.obsnum',None], # LMT only, will call _parse_obsnum
+        'ObsnumList': ['obsnumlist','alma.obsnumlist',None], # LMT only, will call _parse_obsnum
         'Instrument': ['instrument','alma.instrument',_gen_str_sql], # LMT only
         'Calibration Status': ['calibration_status','alma.calibration_status',_gen_str_sql], # LMT only
         'Target Region':['target_region','alma.region',None],# LMT ONLY since no sources table -special case where we will parse internally
@@ -264,7 +264,7 @@ class ADMITClass(BaseQuery):
         c1 = list(self._key_description.values())
         c2 = list(self._key_description.keys())
         c3 = list(dbtable.values())
-        print(len(c1),len(c2),len(c3))
+        #print(len(c1),len(c2),len(c3))
         self.ktable = Table([c1,c2,c3],names=("Keyword", "Description","Database Table"))
      
     def load_alma_pickle(self, alma_pickle):
@@ -303,7 +303,7 @@ class ADMITClass(BaseQuery):
             raise Exception(f"Unrecognized keywords: {bad}")
         else:
             sqlq = self._gen_sql(kwargs)
-            print(sqlq,"\n")
+            #print(sqlq,"\n")
             return pd.DataFrame(data=self.sql(sqlq),columns=self._out_colnames)
 
     def check(self):
@@ -403,7 +403,7 @@ class ADMITClass(BaseQuery):
         print("   lines:     all lines detected in the SPW's")
         print("   sources:   all sources detected in each ADMIT LineCube")
         
-    def _parse_region(self,region,constraint):
+    def _parse_region(self,constraint,region):
         ''' get a square region centered on ra, dec '''
         c = region[0]
         size = region[1]
@@ -424,6 +424,27 @@ class ADMITClass(BaseQuery):
             raise KeyError(f"Unrecognized constraint in region search: {constraint}")
         return sql  
     
+    def _parse_obsnum(self,constraint,value):
+        '''LMT specific method to find an obsnum in either the obsnum column or obsnumlist column.
+           LMT obsnum strings could be a single value (12345) or a range (12345_12353). For
+           ranges it is not guaranteed that all values in between will be in the range.
+           obsnumlist will always be a comma-separated list of every actual obsnum
+           present in the obsnum string.  So in the range example above, it could be
+           12345,12346,12349,12350,12353.
+        '''
+        if constraint == "obsnum":
+            # The query gave a specific range value of obsnum, so take it literally
+            if "_" in value: 
+                return _gen_str_sql("alma.obsnum",value)
+            else:
+                # The query gave a single obsnum, so we can search only obsnumlist to find it.
+                if "*" not in value:
+                    value = '*' + value + '*'  # wildcard it to find anything in obsnumlist that matches
+                return _gen_str_sql("alma.obsnumlist",value)
+        elif constraint == "obsnumlist":
+                # The query gave a specific obsnumlist, take it literally
+                return _gen_str_sql("alma.obsnumlist",value)
+            
     def _gen_sql(self,payload):
         '''Transform the user keywords into an SQL string'''
         # Query joins alma and win tables always.
@@ -453,13 +474,19 @@ class ADMITClass(BaseQuery):
                             val = payload[constraint]
                             #print(constraint)
                             # em_resolution is special-cased. see astroquery/alma/core.py
-                            # i think this is a bug in alma/core.py should be 'spectral_resolution'
+                            # I think this is a bug in alma/core.py should be 'spectral_resolution'
                             if constraint == 'alma.em_resolution': 
                                 # em_resolution does not require any transformation
                                 attrib_where = _gen_numeric_sql(constraint, val)
                             elif constraint == "region" or constraint=="target_region":
-                                attrib_where = self._parse_region(val,constraint)
+                                attrib_where = self._parse_region(constraint,val)
+                            # handle joint query of obsnum and obsnumlist
+                            elif "obsnum" in constraint:
+                                attrib_where = self._parse_obsnum(constraint,val)
+                                print(f"Obsnum search got: {attrib_where}")
                             else:
+                                #attrib[2] is function for parsing
+                                #attrib[1] is alma table column name
                                 attrib_where = attrib[2](attrib[1], val)
                             # Example of ADMIT virtual keyword
                             #  Replace win.snr_w with '( win.peak_ / win.rms_w )'
@@ -473,7 +500,7 @@ class ADMITClass(BaseQuery):
                                     where = ' WHERE '
                                 where += attrib_where  
         ############################################################################
-        # Do whatever additional joins are ncessary based on the triggers above.
+        # Do whatever additional joins are necessary based on the triggers above.
         # The order of the join matters so that we get the column names correct and
         # the user always gets them in the same order.
         # We should always join in this order:
