@@ -19,7 +19,7 @@ from ..alma.tapsql import _gen_pos_sql, _gen_str_sql, _gen_numeric_sql,\
 __all__ = ['ADMIT', 'ADMITClass','ADMIT_FORM_KEYS']
         
 
-__version__ = "27-feb-2023"
+__version__ = "07-apr-2023"
 
 def version():
     return __version__
@@ -94,7 +94,7 @@ ADMIT_FORM_KEYS = {
         'Observation': ['obs_id','alma.obs_id',_gen_str_sql],
         'Observatory': ['observatory','alma.observatory',_gen_str_sql], #LMT only?
         'Obsnum': ['obsnum','alma.obsnum',_gen_str_sql], # LMT only
-        'ObsnumList': ['obsnum','alma.obsnumlist',_gen_str_sql], # LMT only
+        'ObsnumList': ['obsnumlist','alma.obsnumlist',_gen_str_sql], # LMT only
         'Instrument': ['instrument','alma.instrument',_gen_str_sql], # LMT only
         'Calibration Status': ['calibration_status','alma.calibration_status',_gen_str_sql], # LMT only
         'Target Region':['target_region','alma.region',None],# LMT ONLY since no sources table -special case where we will parse internally
