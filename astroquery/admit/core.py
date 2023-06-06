@@ -96,7 +96,9 @@ ADMIT_FORM_KEYS = {
         'Obsnum': ['obsnum','alma.obsnum',None], # LMT only, will call _parse_obsnum
         'ObsnumList': ['obsnumlist','alma.obsnumlist',None], # LMT only, will call _parse_obsnum
         'Instrument': ['instrument','alma.instrument',_gen_str_sql], # LMT only
-        'Calibration Status': ['calibration_status','alma.calibration_status',_gen_str_sql], # LMT only
+        'Calibration Status': ['calibration_level','alma.calibration_level',_gen_numeric_sql], # LMT only
+        'Observation Goal': ['obs_goal','alma.obs_goal',_gen_str_sql], # LMT only
+        'Observation Comment': ['obs_comment','alma.obs_comment',_gen_str_sql], # LMT only
         'Target Region':['target_region','alma.region',None],# LMT ONLY since no sources table -special case where we will parse internally
         # From here below are just a copy of ALMA_FORM_KEYS without the external wrapper dict.
         # Position
