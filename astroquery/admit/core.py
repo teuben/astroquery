@@ -8,6 +8,7 @@ from astropy.table import Table
 import pandas as pd
 from astropy import units as u
 from astropy.coordinates import SkyCoord
+import numpy as np
 #from astropy.time import Time
 
 from ..query import BaseQuery
@@ -428,7 +429,8 @@ class ADMITClass(BaseQuery):
     
     def _parse_obsnum(self,constraint,value):
         '''LMT specific method to find an obsnum in either the obsnum column or obsnumlist column.
-           LMT obsnum strings could be a single value (12345) or a range (12345_12353). For
+           LMT obsnum strings could be a single value (12345), or a list 12345,12927,21654, 
+           or a range (12345:12353). For
            ranges it is not guaranteed that all values in between will be in the range.
            obsnumlist will always be a comma-separated list of every actual obsnum
            present in the obsnum string.  So in the range example above, it could be
@@ -438,6 +440,19 @@ class ADMITClass(BaseQuery):
             # The query gave a specific range value of obsnum, so take it literally
             if "_" in value: 
                 return _gen_str_sql("alma.obsnum",value)
+            elif ":" in value:  # The query wants anything in the range v[0]:v[1](+1)
+                v = [int(x) for x in value.split(':') ]
+                if v[0] > v[1]: # in case they put them in backwards
+                    tmp = v[1]
+                    v[1] = v[0]
+                    v[1] = tmp
+                vv = str(np.arange(v[0],v[1])).replace('\n','')  # space separated list that has \n in it so remove them
+                # _gen_band_list_sql does an OR join of a space separated list
+                return _gen_band_list_sql("alma.obsnum",vv[1:-1]) # remove the [] from the string
+            elif "," in value:  # The query wants to match any of a list of obsnums
+                vv = value.replace(',',' ')
+                #print(f'genband value={vv} sql={_gen_band_list_sql("alma.obsnum",vv)}')
+                return _gen_band_list_sql("alma.obsnum",vv) # remove the [] from the string
             else:
                 # The query gave a single obsnum, so we can search only obsnumlist to find it.
                 if "*" not in value:
