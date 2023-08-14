@@ -15,7 +15,7 @@ from ..query import BaseQuery
 from ..utils import commons, async_to_sync
 from ..alma.tapsql import _gen_pos_sql, _gen_str_sql, _gen_numeric_sql,\
     _gen_band_list_sql, _gen_datetime_sql, _gen_pol_sql, _gen_pub_sql,\
-    _gen_science_sql, _gen_spec_res_sql, ALMA_DATE_FORMAT
+    _gen_science_sql, _gen_spec_res_sql, _val_parse, ALMA_DATE_FORMAT
 
 __all__ = ['ADMIT', 'ADMITClass','ADMIT_FORM_KEYS']
         
@@ -306,7 +306,9 @@ class ADMITClass(BaseQuery):
             raise Exception(f"Unrecognized keywords: {bad}")
         else:
             sqlq = self._gen_sql(kwargs)
-            #print(sqlq,"\n")
+            #print("SQLQ ",sqlq,"\n")
+            #data = self.sql(sqlq)
+           # print("DATA ",data)
             return pd.DataFrame(data=self.sql(sqlq),columns=self._out_colnames)
 
     def check(self):
@@ -429,31 +431,41 @@ class ADMITClass(BaseQuery):
     
     def _parse_obsnum(self,constraint,value):
         '''LMT specific method to find an obsnum in either the obsnum column or obsnumlist column.
-           LMT obsnum strings could be a single value (12345), or a list 12345,12927,21654, 
-           or a range (12345:12353). For
+           LMT obsnum strings could be a single value (12345) or a range (12345:12353). For
            ranges it is not guaranteed that all values in between will be in the range.
            obsnumlist will always be a comma-separated list of every actual obsnum
            present in the obsnum string.  So in the range example above, it could be
            12345,12346,12349,12350,12353.
         '''
+        print(f"parse_obsnum constraint={constraint},value={value}")
         if constraint == "obsnum":
             # The query gave a specific range value of obsnum, so take it literally
             if "_" in value: 
+                print("UNDERSCORE")
                 return _gen_str_sql("alma.obsnum",value)
             elif ":" in value:  # The query wants anything in the range v[0]:v[1](+1)
+                print("COLON")
                 v = [int(x) for x in value.split(':') ]
-                if v[0] > v[1]: # in case they put them in backwards
-                    tmp = v[1]
-                    v[1] = v[0]
-                    v[1] = tmp
-                vv = str(np.arange(v[0],v[1])).replace('\n','')  # space separated list that has \n in it so remove them
+                # sort in case they put them in backwards.
+                # tapsql.py will interpret a tuple as interval (min,max)
+                vv  = tuple(sorted(v))
+                #print(f'REPALCE {vv} with {self._gen_numeric_obsnum_sql("alma.obsnum",vv)}')
+                #return self._gen_numeric_obsnum_sql("alma.obsnum",vv)
+                #print("VV ",str(np.arange(v[0],v[1])))
+                # add one to make inclusive range
+                vv = str(np.arange(vv[0],vv[1]+1)).replace('\n','')  # space separated list that has \n in it so remove them
+                #print(f'REAPLCE with {_gen_band_list_sql("alma.obsnumlist",vv[1:-1])}')
+                xx = len(_gen_band_list_sql("alma.obsnumlist",vv[1:-1]))
+                print(f'QUERY length {xx}')
                 # _gen_band_list_sql does an OR join of a space separated list
-                return _gen_band_list_sql("alma.obsnum",vv[1:-1]) # remove the [] from the string
+                return _gen_band_list_sql("alma.obsnumlist",vv[1:-1]) # remove the [] from the string
             elif "," in value:  # The query wants to match any of a list of obsnums
+                print("COMMA")
                 vv = value.replace(',',' ')
-                #print(f'genband value={vv} sql={_gen_band_list_sql("alma.obsnum",vv)}')
-                return _gen_band_list_sql("alma.obsnum",vv) # remove the [] from the string
+                print(f'REPLCE with {_gen_band_list_sql("alma.obsnumlist",vv)}')
+                return _gen_band_list_sql("alma.obsnumlist",vv) # remove the [] from the string
             else:
+                print("OTHER")
                 # The query gave a single obsnum, so we can search only obsnumlist to find it.
                 if "*" not in value:
                     value = '*' + value + '*'  # wildcard it to find anything in obsnumlist that matches
@@ -544,6 +556,33 @@ class ADMITClass(BaseQuery):
             sql = sql + join
 
         return sql + where
+
+    def _gen_numeric_obsnum_sql(self,field, value):
+        result = ''
+        for interval in _val_parse(value, float):
+            if result:
+                result += ' OR '
+            if isinstance(interval, tuple):
+                int_min, int_max = interval
+                if int_min is None:
+                    if int_max is None:
+                        # no constraints on bandwith
+                        pass
+                    else:
+                        result += 'TRY_CONVERT(FLOAT,{})<={}'.format(field, int_max)
+                elif int_max is None:
+                    result += 'TRY_CONVERT(FLOAT,{})>={}'.format(field, int_min)
+                else:
+                    result += '({1}<=TRY_CONVERT(FLOAT,{0}) AND TRY_CONVERT(FLOAT,{0})<={2})'.format(field, int_min,
+                                                               int_max)
+            else:
+                result += '{}={}'.format(field, interval)
+        if ' OR ' in result:
+            # use brakets for multiple ORs
+            return '(' + result + ')'
+        else:
+            return result
+
 
 ADMIT = ADMITClass
 
