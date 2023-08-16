@@ -96,6 +96,8 @@ ADMIT_FORM_KEYS = {
         'Observatory': ['observatory','alma.observatory',_gen_str_sql], #LMT only?
         'Obsnum': ['obsnum','alma.obsnum',None], # LMT only, will call _parse_obsnum
         'ObsnumList': ['obsnumlist','alma.obsnumlist',None], # LMT only, will call _parse_obsnum
+        'MinObsnum': ['min_obsnum','alma.min_obsnum',_gen_numeric_sql], # LMT only
+        'MaxObsnum': ['max_obsnum','alma.max_obsnum',_gen_numeric_sql], # LMT only
         'Instrument': ['instrument','alma.instrument',_gen_str_sql], # LMT only
         'Calibration Status': ['calibration_level','alma.calibration_level',_gen_numeric_sql], # LMT only
         'Observation Goal': ['obs_goal','alma.obs_goal',_gen_str_sql], # LMT only
@@ -449,16 +451,16 @@ class ADMITClass(BaseQuery):
                 # sort in case they put them in backwards.
                 # tapsql.py will interpret a tuple as interval (min,max)
                 vv  = tuple(sorted(v))
-                #print(f'REPALCE {vv} with {self._gen_numeric_obsnum_sql("alma.obsnum",vv)}')
-                #return self._gen_numeric_obsnum_sql("alma.obsnum",vv)
+                print(f'TEST {vv} with {self._gen_numeric_obsnum_sql("alma.obsnum",vv)}')
+                return self._gen_numeric_obsnum_sql("alma.obsnum",vv)
                 #print("VV ",str(np.arange(v[0],v[1])))
                 # add one to make inclusive range
-                vv = str(np.arange(vv[0],vv[1]+1)).replace('\n','')  # space separated list that has \n in it so remove them
+                #vv = str(np.arange(vv[0],vv[1]+1)).replace('\n','')  # space separated list that has \n in it so remove them
                 #print(f'REAPLCE with {_gen_band_list_sql("alma.obsnumlist",vv[1:-1])}')
-                xx = len(_gen_band_list_sql("alma.obsnumlist",vv[1:-1]))
-                print(f'QUERY length {xx}')
+                #xx = len(_gen_band_list_sql("alma.obsnumlist",vv[1:-1]))
+                #print(f'QUERY length {xx}')
                 # _gen_band_list_sql does an OR join of a space separated list
-                return _gen_band_list_sql("alma.obsnumlist",vv[1:-1]) # remove the [] from the string
+                #return _gen_band_list_sql("alma.obsnumlist",vv[1:-1]) # remove the [] from the string
             elif "," in value:  # The query wants to match any of a list of obsnums
                 print("COMMA")
                 vv = value.replace(',',' ')
@@ -569,16 +571,16 @@ class ADMITClass(BaseQuery):
                         # no constraints on bandwith
                         pass
                     else:
-                        result += 'TRY_CONVERT(FLOAT,{})<={}'.format(field, int_max)
+#SELECT * FROM ALMA WHERE CAST(ALMA.OBSNUM AS INTEGER) <= 106222 AND CAST(ALMA.OBSNUM AS INTEGER) >= 106000;
+                        result += 'ALMA.OBSNUM = ALMA.OBSNUMLIST AND ALMA.MIN_OBSNUM <= {1}'.format(field, int_max)
                 elif int_max is None:
-                    result += 'TRY_CONVERT(FLOAT,{})>={}'.format(field, int_min)
+                        result += 'ALMA.OBSNUM = ALMA.OBSNUMLIST AND ALMA.MIN_OBSNUM >= {1}'.format(field, int_min)
                 else:
-                    result += '({1}<=TRY_CONVERT(FLOAT,{0}) AND TRY_CONVERT(FLOAT,{0})<={2})'.format(field, int_min,
-                                                               int_max)
+                    result += 'ALMA.MIN_OBSNUM >= {1} AND ALMA.MAX_OBSNUM <= {2}'.format(field, int_min, int_max)
             else:
                 result += '{}={}'.format(field, interval)
         if ' OR ' in result:
-            # use brakets for multiple ORs
+            # use brackets for multiple ORs
             return '(' + result + ')'
         else:
             return result
