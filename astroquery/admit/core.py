@@ -94,15 +94,19 @@ ADMIT_FORM_KEYS = {
     'Alma': {
         'Observation': ['obs_id','alma.obs_id',_gen_str_sql],
         'Observatory': ['observatory','alma.observatory',_gen_str_sql], #LMT only?
-        'Obsnum': ['obsnum','alma.obsnum',None], # LMT only, will call _parse_obsnum
-        'ObsnumList': ['obsnumlist','alma.obsnumlist',None], # LMT only, will call _parse_obsnum
-        'MinObsnum': ['min_obsnum','alma.min_obsnum',_gen_numeric_sql], # LMT only
-        'MaxObsnum': ['max_obsnum','alma.max_obsnum',_gen_numeric_sql], # LMT only
+        'Obsnum': ['obsnum','alma.obsnum',_gen_numeric_sql], # LMT only, in obsInfo block
+        'SubObsnum': ['obsnum','alma.subobsnum',_gen_numeric_sql], # LMT only, in obsInfo block
+        'Scannum': ['scannum','alma.scannum',_gen_numeric_sql], # LMT only, in obsInfo block
+        'Observation Goal': ['obs_goal','alma.obs_goal',_gen_str_sql], # LMT only, in obsInfo block
+        'Observation Comment': ['obs_comment','alma.obs_comment',_gen_str_sql], # LMT only, in obsInfo block
+        'Opacity at 225 GHz': ['opacity', 'alma.opacity', _gen_numeric_sql], #LMT only, in obsInfo block
+        #'ObsnumList': ['obsnumlist','alma.obsnumlist',None], # LMT only, will call _parse_obsnum
+        #'MinObsnum': ['min_obsnum','alma.min_obsnum',_gen_numeric_sql], # LMT only
+        #'MaxObsnum': ['max_obsnum','alma.max_obsnum',_gen_numeric_sql], # LMT only
         'Instrument': ['instrument','alma.instrument',_gen_str_sql], # LMT only
-        'Calibration Status': ['calibration_level','alma.calibration_level',_gen_numeric_sql], # LMT only
-        'Observation Goal': ['obs_goal','alma.obs_goal',_gen_str_sql], # LMT only
-        'Observation Comment': ['obs_comment','alma.obs_comment',_gen_str_sql], # LMT only
+        'Calibration Level': ['calibration_level','alma.calibration_level',_gen_numeric_sql], # LMT only
         'Target Region':['target_region','alma.region',None],# LMT ONLY since no sources table -special case where we will parse internally
+        'Total Integration time (s)': ['total_integration_time', 'alma.t_total_exptime', _gen_numeric_sql], #LMT Only
         # From here below are just a copy of ALMA_FORM_KEYS without the external wrapper dict.
         # Position
         'Source name (astropy Resolver)': ['source_name_resolver',
