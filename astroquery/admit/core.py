@@ -25,6 +25,13 @@ __version__ = "07-apr-2023"
 def version():
     return __version__
 
+def _gen_bool_sql(field, value):
+    if value == 1:
+        return True
+    elif value == 0:
+        return False
+    raise ValueError(f"Cannot convert {value} to boolean")
+
 # This mimics the ALMA_FORM_KEYS in alma/core.py.  The assumption here is
 # that there is a web form in front of this.  We don't have it for ADMIT, but
 # pretending we do means we can follow alma/core.py functions.
@@ -94,12 +101,16 @@ ADMIT_FORM_KEYS = {
     'Alma': {
         'Observation': ['obs_id','alma.obs_id',_gen_str_sql],
         'Observatory': ['observatory','alma.observatory',_gen_str_sql], #LMT only?
+        # begin LMT obsInfo block ------------------------------
         'Obsnum': ['obsnum','alma.obsnum',_gen_numeric_sql], # LMT only, in obsInfo block
-        'SubObsnum': ['obsnum','alma.subobsnum',_gen_numeric_sql], # LMT only, in obsInfo block
+        'SubObsnum': ['subobsnum','alma.subobsnum',_gen_numeric_sql], # LMT only, in obsInfo block
         'Scannum': ['scannum','alma.scannum',_gen_numeric_sql], # LMT only, in obsInfo block
         'Observation Goal': ['obs_goal','alma.obs_goal',_gen_str_sql], # LMT only, in obsInfo block
         'Observation Comment': ['obs_comment','alma.obs_comment',_gen_str_sql], # LMT only, in obsInfo block
         'Opacity at 225 GHz': ['opacity', 'alma.opacity', _gen_numeric_sql], #LMT only, in obsInfo block
+        # end LMT obsInfo block ------------------------------
+        'Reference ID' :['ref_id','alma.ref_id',_gen_str_sql], # LMT only
+        'Combined' :['is_combined','alma.is_combined',_gen_bool_sql], # LMT only
         #'ObsnumList': ['obsnumlist','alma.obsnumlist',None], # LMT only, will call _parse_obsnum
         #'MinObsnum': ['min_obsnum','alma.min_obsnum',_gen_numeric_sql], # LMT only
         #'MaxObsnum': ['max_obsnum','alma.max_obsnum',_gen_numeric_sql], # LMT only
@@ -589,6 +600,7 @@ class ADMITClass(BaseQuery):
         else:
             return result
 
+#------------------------------------------------------------------
 
 ADMIT = ADMITClass
 
