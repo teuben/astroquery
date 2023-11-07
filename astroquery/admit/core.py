@@ -4,9 +4,10 @@ import re
 import os
 import sqlite3
 import pickle
-from astropy.table import Table
 import pandas as pd
+from astropy.table import Table
 from astropy import units as u
+from astropy.time import Time
 from astropy.coordinates import SkyCoord
 import numpy as np
 
@@ -19,7 +20,7 @@ from ..alma.tapsql import (
     _gen_str_sql,
     _gen_numeric_sql,
     _gen_band_list_sql,
-    _gen_datetime_sql,
+#    _gen_datetime_sql, # Use our own version because alma hardcode's their date format
     _gen_pol_sql,
     _gen_pub_sql,
     _gen_science_sql,
@@ -31,8 +32,9 @@ from ..alma.tapsql import (
 __all__ = ["ADMIT", "ADMITClass", "ADMIT_FORM_KEYS"]
 
 
-__version__ = "07-apr-2023"
+__version__ = "07-Nov-2023"
 
+LMA_DATE_FORMAT = '%Y-%m-%d'
 
 def version():
     return __version__
@@ -44,6 +46,34 @@ def _gen_bool_sql(field, value):
     elif value == 0:
         return False
     raise ValueError(f"Cannot convert {value} to boolean")
+
+def _gen_datetime_sql(field, value):
+    result = ''
+    for interval in _val_parse(value, str):
+        if result:
+            result += ' OR '
+        if isinstance(interval, tuple):
+            min_datetime, max_datetime = interval
+            if max_datetime is None:
+                result += "{}>={}".format(
+                    field, Time(datetime.strptime(min_datetime, LMA_DATE_FORMAT)).mjd)
+            elif min_datetime is None:
+                result += "{}<={}".format(
+                    field, Time(datetime.strptime(max_datetime, LMA_DATE_FORMAT)).mjd)
+            else:
+                result += "({1}<={0} AND {0}<={2})".format(
+                    field, Time(datetime.strptime(min_datetime, LMA_DATE_FORMAT)).mjd,
+                    Time(datetime.strptime(max_datetime, LMA_DATE_FORMAT)).mjd)
+        else:
+            # TODO is it just a value (midnight) or the entire day?
+            result += "{}={}".format(
+                field, Time(datetime.strptime(interval, LMA_DATE_FORMAT)).mjd)
+    if ' OR ' in result:
+        # use brackets for multiple ORs
+        return '(' + result + ')'
+    else:
+        return result
+
 
 
 # This mimics the ALMA_FORM_KEYS in alma/core.py.  The assumption here is
@@ -143,7 +173,7 @@ ADMIT_FORM_KEYS = {
         "Obsnum": [
             "obsnum",
             "alma.obsnum",
-            _gen_numeric_sql,
+            None, # will call _parse_obsnum
         ],  # LMT only, in obsInfo block
         "SubObsnum": [
             "subobsnum",
@@ -173,13 +203,15 @@ ADMIT_FORM_KEYS = {
         # end LMT obsInfo block ------------------------------
         "Reference ID": ["ref_id", "alma.ref_id", _gen_str_sql],  # LMT only
         "Combined": ["is_combined", "alma.is_combined", _gen_bool_sql],  # LMT only
-        #'ObsnumList': ['obsnumlist','alma.obsnumlist',None], # LMT only, will call _parse_obsnum
-        #'MinObsnum': ['min_obsnum','alma.min_obsnum',_gen_numeric_sql], # LMT only
-        #'MaxObsnum': ['max_obsnum','alma.max_obsnum',_gen_numeric_sql], # LMT only
         "Instrument": ["instrument", "alma.instrument", _gen_str_sql],  # LMT only
         "Calibration Level": [
             "calibration_level",
             "alma.calibration_level",
+            _gen_numeric_sql,
+        ],  # LMT only
+        "Processing Level": [
+            "calibration_level",
+            "alma.processing_level",
             _gen_numeric_sql,
         ],  # LMT only
         "Target Region": [
@@ -197,6 +229,13 @@ ADMIT_FORM_KEYS = {
             "public_date",
             "alma.public_date",
             _gen_datetime_sql,
+        ],  # LMT Only
+        "isPolarimetry": ["is_polarimetry", "alma.is_polarimetry", _gen_bool_sql],  # LMT only
+        # Half wave plate mode
+        "Half Wave Plate Mode (Absent, Fixed, Rotating)": [
+            "half_wave_plate_mode",
+            "alma.half_wave_plate_mode",
+            _gen_str_sql,
         ],  # LMT Only
         # From here below are just a copy of ALMA_FORM_KEYS without the external wrapper dict.
         # Position
@@ -216,7 +255,7 @@ ADMIT_FORM_KEYS = {
             "s_velocity",
             "alma.s_velocity",
             _gen_numeric_sql,
-        ],  # LMT only
+        ],  # LMT only(?)
         "Angular resolution (arcsec)": [
             "spatial_resolution",
             "alma.spatial_resolution",
@@ -384,6 +423,7 @@ class ADMITClass(BaseQuery):
         self._coltypes = dict()
         for tab in ["alma", "win", "sources", "lines", "header"]:
             result = self.sql(f"PRAGMA table_info({tab});")
+            print(f"PRAGMA {tab}={result}")
             self._colnames[tab] = [x[1] for x in result]
             # _coltypes not currently used but perhaps helpful
             self._coltypes[tab] = [type_dict[x[2].lower()] for x in result]
@@ -572,55 +612,28 @@ class ADMITClass(BaseQuery):
         return sql
 
     def _parse_obsnum(self, constraint, value):
-        """LMT specific method to find an obsnum in either the obsnum column or obsnumlist column.
-        LMT obsnum strings could be a single value (12345) or a range (12345:12353). For
+        """LMT specific method to find an obsnum in the obsnum column.
+        LMT obsnum search strings could be a single value (12345) 
+        or a range (12345:12353). For
         ranges it is not guaranteed that all values in between will be in the range.
-        obsnumlist will always be a comma-separated list of every actual obsnum
-        present in the obsnum string.  So in the range example above, it could be
-        12345,12346,12349,12350,12353.
         """
         print(f"parse_obsnum constraint={constraint},value={value}")
         if constraint == "obsnum":
-            # The query gave a specific range value of obsnum, so take it literally
-            if "_" in value:
-                print("UNDERSCORE")
-                return _gen_str_sql("alma.obsnum", value)
-            elif ":" in value:  # The query wants anything in the range v[0]:v[1](+1)
-                print("COLON")
+            if ":" in value:  # The query wants anything in the range v[0]:v[1](+1)
                 v = [int(x) for x in value.split(":")]
                 # sort in case they put them in backwards.
                 # tapsql.py will interpret a tuple as interval (min,max)
                 vv = tuple(sorted(v))
-                print(
-                    f'TEST {vv} with {self._gen_numeric_obsnum_sql("alma.obsnum",vv)}'
-                )
-                return self._gen_numeric_obsnum_sql("alma.obsnum", vv)
-                # print("VV ",str(np.arange(v[0],v[1])))
-                # add one to make inclusive range
-                # vv = str(np.arange(vv[0],vv[1]+1)).replace('\n','')  # space separated list that has \n in it so remove them
-                # print(f'REAPLCE with {_gen_band_list_sql("alma.obsnumlist",vv[1:-1])}')
-                # xx = len(_gen_band_list_sql("alma.obsnumlist",vv[1:-1]))
-                # print(f'QUERY length {xx}')
-                # _gen_band_list_sql does an OR join of a space separated list
-                # return _gen_band_list_sql("alma.obsnumlist",vv[1:-1]) # remove the [] from the string
+                return _gen_numeric_sql("alma.obsnum", vv)
             elif "," in value:  # The query wants to match any of a list of obsnums
-                print("COMMA")
-                vv = value.replace(",", " ")
-                print(f'REPLCE with {_gen_band_list_sql("alma.obsnumlist",vv)}')
-                return _gen_band_list_sql(
-                    "alma.obsnumlist", vv
-                )  # remove the [] from the string
+                v = [int(x) for x in value.split(",")]
+                retval = ""
+                for val in v:
+                    retval += _gen_numeric_sql("alma.obsnum",v)
+                return retval
             else:
-                print("OTHER")
-                # The query gave a single obsnum, so we can search only obsnumlist to find it.
-                if "*" not in value:
-                    value = (
-                        "*" + value + "*"
-                    )  # wildcard it to find anything in obsnumlist that matches
-                return _gen_str_sql("alma.obsnumlist", value)
-        elif constraint == "obsnumlist":
-            # The query gave a specific obsnumlist, take it literally
-            return _gen_str_sql("alma.obsnumlist", value)
+                # The query gave a single obsnum
+                return _gen_numeric_sql("alma.obsnum", value)
 
     def _gen_sql(self, payload):
         """Transform the user keywords into an SQL string"""
