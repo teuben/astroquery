@@ -5,6 +5,7 @@ import os
 import sqlite3
 import pickle
 import pandas as pd
+from datetime import datetime
 from astropy.table import Table
 from astropy import units as u
 from astropy.time import Time
@@ -49,6 +50,7 @@ def _gen_bool_sql(field, value):
 
 def _gen_datetime_sql(field, value):
     result = ''
+    print(f"Parsing {value}")
     for interval in _val_parse(value, str):
         if result:
             result += ' OR '
@@ -68,6 +70,7 @@ def _gen_datetime_sql(field, value):
             # TODO is it just a value (midnight) or the entire day?
             result += "{}={}".format(
                 field, Time(datetime.strptime(interval, LMA_DATE_FORMAT)).mjd)
+    print(f"TIME RESULT is {result}")
     if ' OR ' in result:
         # use brackets for multiple ORs
         return '(' + result + ')'
@@ -423,7 +426,7 @@ class ADMITClass(BaseQuery):
         self._coltypes = dict()
         for tab in ["alma", "win", "sources", "lines", "header"]:
             result = self.sql(f"PRAGMA table_info({tab});")
-            print(f"PRAGMA {tab}={result}")
+            #print(f"PRAGMA {tab}={result}")
             self._colnames[tab] = [x[1] for x in result]
             # _coltypes not currently used but perhaps helpful
             self._coltypes[tab] = [type_dict[x[2].lower()] for x in result]
