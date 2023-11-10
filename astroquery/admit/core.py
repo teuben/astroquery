@@ -48,9 +48,13 @@ def _gen_bool_sql(field, value):
         return False
     raise ValueError(f"Cannot convert {value} to boolean")
 
-def _gen_datetime_sql(field, value):
+def _gen_lmt_datetime_sql(field, value):
     result = ''
-    print(f"Parsing {value}")
+    # SQLLite does not have a date type.  Since we are storing dates as
+    # text, we convert all dates to Julian Day and do a comparison numerically.
+    # Fortunately, SQLLite has a julianday() function that takes ISO date text.
+    jd = "julianday({})".format(field)
+    #print(f"Parsing {value}={jd}")
     for interval in _val_parse(value, str):
         if result:
             result += ' OR '
@@ -58,26 +62,24 @@ def _gen_datetime_sql(field, value):
             min_datetime, max_datetime = interval
             if max_datetime is None:
                 result += "{}>={}".format(
-                    field, Time(datetime.strptime(min_datetime, LMA_DATE_FORMAT)).mjd)
+                    jd, Time(datetime.strptime(min_datetime, LMA_DATE_FORMAT)).jd)
             elif min_datetime is None:
                 result += "{}<={}".format(
-                    field, Time(datetime.strptime(max_datetime, LMA_DATE_FORMAT)).mjd)
+                    jd, Time(datetime.strptime(max_datetime, LMA_DATE_FORMAT)).jd)
             else:
                 result += "({1}<={0} AND {0}<={2})".format(
-                    field, Time(datetime.strptime(min_datetime, LMA_DATE_FORMAT)).mjd,
-                    Time(datetime.strptime(max_datetime, LMA_DATE_FORMAT)).mjd)
+                    jd, Time(datetime.strptime(min_datetime, LMA_DATE_FORMAT)).jd,
+                    Time(datetime.strptime(max_datetime, LMA_DATE_FORMAT)).jd)
         else:
             # TODO is it just a value (midnight) or the entire day?
             result += "{}={}".format(
-                field, Time(datetime.strptime(interval, LMA_DATE_FORMAT)).mjd)
-    print(f"TIME RESULT is {result}")
+                jd, Time(datetime.strptime(interval, LMA_DATE_FORMAT)).jd)
+    #print(f"TIME RESULT is {result}")
     if ' OR ' in result:
         # use brackets for multiple ORs
         return '(' + result + ')'
     else:
         return result
-
-
 
 # This mimics the ALMA_FORM_KEYS in alma/core.py.  The assumption here is
 # that there is a web form in front of this.  We don't have it for ADMIT, but
@@ -205,7 +207,7 @@ ADMIT_FORM_KEYS = {
         ],  # LMT only, in obsInfo block
         # end LMT obsInfo block ------------------------------
         "Reference ID": ["ref_id", "alma.ref_id", _gen_str_sql],  # LMT only
-        "Combined": ["is_combined", "alma.is_combined", _gen_bool_sql],  # LMT only
+        "Combined": ["is_combined", "alma.is_combined", _gen_numeric_sql],  # LMT only
         "Instrument": ["instrument", "alma.instrument", _gen_str_sql],  # LMT only
         "Calibration Level": [
             "calibration_level",
@@ -231,9 +233,9 @@ ADMIT_FORM_KEYS = {
         "Public Date": [
             "public_date",
             "alma.public_date",
-            _gen_datetime_sql,
+            _gen_lmt_datetime_sql,
         ],  # LMT Only
-        "isPolarimetry": ["is_polarimetry", "alma.is_polarimetry", _gen_bool_sql],  # LMT only
+        "isPolarimetry": ["is_polarimetry", "alma.is_polarimetry", _gen_numeric_sql],  # LMT only
         # Half wave plate mode
         "Half Wave Plate Mode (Absent, Fixed, Rotating)": [
             "half_wave_plate_mode",
@@ -280,7 +282,7 @@ ADMIT_FORM_KEYS = {
         ],
         "Band": ["band_list", "alma.band_list", _gen_band_list_sql],
         # Time
-        "Observation date": ["start_date", "alma.t_min", _gen_datetime_sql],
+        "Observation date": ["start_date", "alma.t_min", _gen_lmt_datetime_sql],
         "Integration time (s)": [
             "integration_time",
             "alma.t_exptime",
@@ -487,9 +489,7 @@ class ADMITClass(BaseQuery):
             raise Exception(f"Unrecognized keywords: {bad}")
         else:
             sqlq = self._gen_sql(kwargs)
-            # print("SQLQ ",sqlq,"\n")
-            # data = self.sql(sqlq)
-            # print("DATA ",data)
+            data = self.sql(sqlq)
             return pd.DataFrame(data=self.sql(sqlq), columns=self._out_colnames)
 
     def check(self):
@@ -723,7 +723,8 @@ class ADMITClass(BaseQuery):
         if join:
             sql = sql + join
 
-        return sql + where
+        print(f"_gen_sql returning : {sql+where}")
+        return f"{sql + where}"
 
     def _gen_numeric_obsnum_sql(self, field, value):
         result = ""
