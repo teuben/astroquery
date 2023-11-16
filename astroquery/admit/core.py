@@ -215,7 +215,7 @@ ADMIT_FORM_KEYS = {
             _gen_numeric_sql,
         ],  # LMT only
         "Processing Level": [
-            "calibration_level",
+            "processing_level",
             "alma.processing_level",
             _gen_numeric_sql,
         ],  # LMT only
