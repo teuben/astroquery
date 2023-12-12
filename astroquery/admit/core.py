@@ -78,7 +78,7 @@ ADMIT_FORM_KEYS = {
         "Frequency width (GHz)": ["freqw", "win.freqw", _gen_numeric_sql],
         "LSR Velocity (km/s)": ["vlsr", "win.vlsr", _gen_numeric_sql],
         "Frequency coverage?": ["fcoverage", "win.fcoverage", _gen_numeric_sql],
-        "QA Grade": ["qagrade", "win.qagrade", _gen_str_sql],  # LMT only
+        "QA Grade": ["qagrade", "win.qagrade", _gen_numeric_sql],  # LMT only
     },
     "Lines": {
         "Spectral window ID(L)": [
