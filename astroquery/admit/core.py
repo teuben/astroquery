@@ -113,7 +113,9 @@ ADMIT_FORM_KEYS = {
         "Frequency width (GHz)": ["freqw", "win.freqw", _gen_numeric_sql],
         "LSR Velocity (km/s)": ["vlsr", "win.vlsr", _gen_numeric_sql],
         "Frequency coverage?": ["fcoverage", "win.fcoverage", _gen_numeric_sql],
-        "QA Grade": ["qagrade", "win.qagrade", _gen_numeric_sql],  # LMT only
+        "QA Grade": ["qagrade", "win.qagrade", 
+            None, # will call _parse_range
+        ],  # LMT only
     },
     "Lines": {
         "Spectral window ID(L)": [
@@ -178,7 +180,7 @@ ADMIT_FORM_KEYS = {
         "Obsnum": [
             "obsnum",
             "alma.obsnum",
-            None, # will call _parse_obsnum
+            None, # will call _parse_range
         ],  # LMT only, in obsInfo block
         "SubObsnum": [
             "subobsnum",
@@ -614,29 +616,30 @@ class ADMITClass(BaseQuery):
             raise KeyError(f"Unrecognized constraint in region search: {constraint}")
         return sql
 
-    def _parse_obsnum(self, constraint, value):
+    def _parse_range(self, constraint, value):
         """LMT specific method to find an obsnum in the obsnum column.
         LMT obsnum search strings could be a single value (12345) 
         or a range (12345:12353). For
         ranges it is not guaranteed that all values in between will be in the range.
         """
-        print(f"parse_obsnum constraint={constraint},value={value}")
-        if constraint == "obsnum":
+        print(f"parse_range constraint={constraint},value={value}")
+        search_str = {"obsnum": "alma.obsnum", "qagrade": "win.qagrade"}
+        if constraint in search_str:
             if ":" in value:  # The query wants anything in the range v[0]:v[1](+1)
                 v = [int(x) for x in value.split(":")]
                 # sort in case they put them in backwards.
                 # tapsql.py will interpret a tuple as interval (min,max)
                 vv = tuple(sorted(v))
-                return _gen_numeric_sql("alma.obsnum", vv)
+                return _gen_numeric_sql(search_str[constraint], vv)
             elif "," in value:  # The query wants to match any of a list of obsnums
                 v = [int(x) for x in value.split(",")]
                 retval = ""
                 for val in v:
-                    retval += _gen_numeric_sql("alma.obsnum",v)
+                    retval += _gen_numeric_sql(search_str[constraint],v)
                 return retval
             else:
-                # The query gave a single obsnum
-                return _gen_numeric_sql("alma.obsnum", value)
+                # The query gave a single value
+                return _gen_numeric_sql(search_str[constraint], value)
 
     def _gen_sql(self, payload):
         """Transform the user keywords into an SQL string"""
@@ -676,9 +679,8 @@ class ADMITClass(BaseQuery):
                             ):
                                 attrib_where = self._parse_region(constraint, val)
                             # handle joint query of obsnum and obsnumlist
-                            elif "obsnum" in constraint:
-                                attrib_where = self._parse_obsnum(constraint, val)
-                                # print(f"Obsnum search got: {attrib_where}")
+                            elif "obsnum" in constraint or "qagrade" in constraint:
+                                attrib_where = self._parse_range(constraint, val)
                             else:
                                 # attrib[2] is function for parsing
                                 # attrib[1] is alma table column name
