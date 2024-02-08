@@ -634,12 +634,15 @@ class ADMITClass(BaseQuery):
             elif "," in value:  # The query wants to match any of a list of obsnums
                 v = [int(x) for x in value.split(",")]
                 retval = ""
-                for val in v:
-                    retval += _gen_numeric_sql(search_str[constraint],v)
+                for i in range(len(v)):
+                    retval += _gen_numeric_sql(search_str[constraint],v[i]) 
+                    if i != len(v)-1:
+                        retval += " OR "
                 return retval
             else:
                 # The query gave a single value
-                return _gen_numeric_sql(search_str[constraint], value)
+                #return _gen_numeric_sql(search_str[constraint], value)
+                return _gen_str_sql(search_str[constraint], value)
 
     def _gen_sql(self, payload):
         """Transform the user keywords into an SQL string"""
