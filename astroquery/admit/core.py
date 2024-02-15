@@ -81,6 +81,30 @@ def _gen_lmt_datetime_sql(field, value):
     else:
         return result
 
+# a version of tapsql._gen_str_sql that adds "ESCAPE \" to the 
+# result string. Otherwise the \ is not interpreted correctly.
+def _gen_str_sql_escape(field, value):
+    result = ''
+    for interval in _val_parse(value, str):
+        if result:
+            result += ' OR '
+        if '*' in interval:
+            # use LIKE
+            # escape wildcards if they exists in the value
+            interval = interval.replace('%', r'\%')  # noqa
+            interval = interval.replace('_', r'\_')  # noqa
+            # ADQL wild cards are % and _
+            interval = interval.replace('*', '%')
+            interval = interval.replace('?', '_')
+            result += r"{} LIKE '{}' ESCAPE '\'".format(field, interval)
+        else:
+            result += "{}='{}'".format(field, interval)
+    if ' OR ' in result:
+        # use brackets for multiple ORs
+        return '(' + result + ')'
+    else:
+        return result
+
 # This mimics the ALMA_FORM_KEYS in alma/core.py.  The assumption here is
 # that there is a web form in front of this.  We don't have it for ADMIT, but
 # pretending we do means we can follow alma/core.py functions.
@@ -208,7 +232,7 @@ ADMIT_FORM_KEYS = {
             _gen_numeric_sql,
         ],  # LMT only, in obsInfo block
         # end LMT obsInfo block ------------------------------
-        "Reference ID": ["ref_id", "alma.ref_id", _gen_str_sql],  # LMT only
+        "Reference ID": ["ref_id", "alma.ref_id", _gen_str_sql_escape],  # LMT only
         "Combined": ["is_combined", "alma.is_combined", _gen_numeric_sql],  # LMT only
         "Instrument": ["instrument", "alma.instrument", _gen_str_sql],  # LMT only
         "Calibration Level": [
