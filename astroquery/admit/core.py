@@ -21,7 +21,7 @@ from ..alma.tapsql import (
     _gen_str_sql,
     _gen_numeric_sql,
     _gen_band_list_sql,
-#    _gen_datetime_sql, # Use our own version because alma hardcode's their date format
+    #    _gen_datetime_sql, # Use our own version because alma hardcode's their date format
     _gen_pol_sql,
     _gen_pub_sql,
     _gen_science_sql,
@@ -35,7 +35,8 @@ __all__ = ["ADMIT", "ADMITClass", "ADMIT_FORM_KEYS"]
 
 __version__ = "07-Nov-2023"
 
-LMA_DATE_FORMAT = '%Y-%m-%d'
+LMA_DATE_FORMAT = "%Y-%m-%d"
+
 
 def version():
     return __version__
@@ -48,62 +49,70 @@ def _gen_bool_sql(field, value):
         return False
     raise ValueError(f"Cannot convert {value} to boolean")
 
+
 def _gen_lmt_datetime_sql(field, value):
-    result = ''
+    result = ""
     # SQLLite does not have a date type.  Since we are storing dates as
     # text, we convert all dates to Julian Day and do a comparison numerically.
     # Fortunately, SQLLite has a julianday() function that takes ISO date text.
     jd = "julianday({})".format(field)
-    #print(f"Parsing {value}={jd}")
+    # print(f"Parsing {value}={jd}")
     for interval in _val_parse(value, str):
         if result:
-            result += ' OR '
+            result += " OR "
         if isinstance(interval, tuple):
             min_datetime, max_datetime = interval
             if max_datetime is None:
                 result += "{}>={}".format(
-                    jd, Time(datetime.strptime(min_datetime, LMA_DATE_FORMAT)).jd)
+                    jd, Time(datetime.strptime(min_datetime, LMA_DATE_FORMAT)).jd
+                )
             elif min_datetime is None:
                 result += "{}<={}".format(
-                    jd, Time(datetime.strptime(max_datetime, LMA_DATE_FORMAT)).jd)
+                    jd, Time(datetime.strptime(max_datetime, LMA_DATE_FORMAT)).jd
+                )
             else:
                 result += "({1}<={0} AND {0}<={2})".format(
-                    jd, Time(datetime.strptime(min_datetime, LMA_DATE_FORMAT)).jd,
-                    Time(datetime.strptime(max_datetime, LMA_DATE_FORMAT)).jd)
+                    jd,
+                    Time(datetime.strptime(min_datetime, LMA_DATE_FORMAT)).jd,
+                    Time(datetime.strptime(max_datetime, LMA_DATE_FORMAT)).jd,
+                )
         else:
             # TODO is it just a value (midnight) or the entire day?
             result += "{}={}".format(
-                jd, Time(datetime.strptime(interval, LMA_DATE_FORMAT)).jd)
-    #print(f"TIME RESULT is {result}")
-    if ' OR ' in result:
+                jd, Time(datetime.strptime(interval, LMA_DATE_FORMAT)).jd
+            )
+    # print(f"TIME RESULT is {result}")
+    if " OR " in result:
         # use brackets for multiple ORs
-        return '(' + result + ')'
+        return "(" + result + ")"
     else:
         return result
 
-# a version of tapsql._gen_str_sql that adds "ESCAPE \" to the 
+
+# a version of tapsql._gen_str_sql that adds "ESCAPE \" to the
 # result string. Otherwise the \ is not interpreted correctly.
 def _gen_str_sql_escape(field, value):
-    result = ''
+    result = ""
     for interval in _val_parse(value, str):
         if result:
-            result += ' OR '
-        if '*' in interval:
+            result += " OR "
+        if "*" in interval:
             # use LIKE
             # escape wildcards if they exists in the value
-            interval = interval.replace('%', r'\%')  # noqa
-            interval = interval.replace('_', r'\_')  # noqa
+            interval = interval.replace("%", r"\%")  # noqa
+            interval = interval.replace("_", r"\_")  # noqa
             # ADQL wild cards are % and _
-            interval = interval.replace('*', '%')
-            interval = interval.replace('?', '_')
+            interval = interval.replace("*", "%")
+            interval = interval.replace("?", "_")
             result += r"{} LIKE '{}' ESCAPE '\'".format(field, interval)
         else:
             result += "{}='{}'".format(field, interval)
-    if ' OR ' in result:
+    if " OR " in result:
         # use brackets for multiple ORs
-        return '(' + result + ')'
+        return "(" + result + ")"
     else:
         return result
+
 
 # This mimics the ALMA_FORM_KEYS in alma/core.py.  The assumption here is
 # that there is a web form in front of this.  We don't have it for ADMIT, but
@@ -137,8 +146,10 @@ ADMIT_FORM_KEYS = {
         "Frequency width (GHz)": ["freqw", "win.freqw", _gen_numeric_sql],
         "LSR Velocity (km/s)": ["vlsr", "win.vlsr", _gen_numeric_sql],
         "Frequency coverage?": ["fcoverage", "win.fcoverage", _gen_numeric_sql],
-        "QA Grade": ["qagrade", "win.qagrade", 
-            None, # will call _parse_range
+        "QA Grade": [
+            "qagrade",
+            "win.qagrade",
+            None,  # will call _parse_range
         ],  # LMT only
     },
     "Lines": {
@@ -204,7 +215,7 @@ ADMIT_FORM_KEYS = {
         "Obsnum": [
             "obsnum",
             "alma.obsnum",
-            None, # will call _parse_range
+            None,  # will call _parse_range
         ],  # LMT only, in obsInfo block
         "SubObsnum": [
             "subobsnum",
@@ -261,7 +272,11 @@ ADMIT_FORM_KEYS = {
             "alma.public_date",
             _gen_lmt_datetime_sql,
         ],  # LMT Only
-        "isPolarimetry": ["is_polarimetry", "alma.is_polarimetry", _gen_numeric_sql],  # LMT only
+        "isPolarimetry": [
+            "is_polarimetry",
+            "alma.is_polarimetry",
+            _gen_numeric_sql,
+        ],  # LMT only
         # Half wave plate mode
         "Half Wave Plate Mode (Absent, Fixed, Rotating)": [
             "half_wave_plate_mode",
@@ -353,6 +368,19 @@ ADMIT_FORM_KEYS = {
         # this may need special handling? or person does search on pub_abstract="*YSO*"
         "Abstract": ["pub_abstract", "alma.pub_abstract", _gen_str_sql],
         "Year": ["publication_year", "alma.pub_year", _gen_numeric_sql],
+        # file ID and versions LMT ONLY
+        "PID": ["persistent_id", "alma.persistent_id", _gen_str_sql],
+        "File ID": ["file_id", "alma.file_id", _gen_numeric_sql],
+        "Major version number": [
+            "version_number",
+            "alma.version_number",
+            _gen_numeric_sql,
+        ],
+        "Minor version number": [
+            "version_minor_number",
+            "alma.version_minor_number",
+            _gen_numeric_sql,
+        ],
     },
 }
 
@@ -454,7 +482,7 @@ class ADMITClass(BaseQuery):
         self._coltypes = dict()
         for tab in ["alma", "win", "sources", "lines", "header"]:
             result = self.sql(f"PRAGMA table_info({tab});")
-            #print(f"PRAGMA {tab}={result}")
+            # print(f"PRAGMA {tab}={result}")
             self._colnames[tab] = [x[1] for x in result]
             # _coltypes not currently used but perhaps helpful
             self._coltypes[tab] = [type_dict[x[2].lower()] for x in result]
@@ -642,7 +670,7 @@ class ADMITClass(BaseQuery):
 
     def _parse_range(self, constraint, value):
         """LMT specific method to find an obsnum in the obsnum column.
-        LMT obsnum search strings could be a single value (12345) 
+        LMT obsnum search strings could be a single value (12345)
         or a range (12345:12353). For
         ranges it is not guaranteed that all values in between will be in the range.
         """
@@ -659,13 +687,13 @@ class ADMITClass(BaseQuery):
                 v = [int(x) for x in value.split(",")]
                 retval = ""
                 for i in range(len(v)):
-                    retval += _gen_numeric_sql(search_str[constraint],v[i]) 
-                    if i != len(v)-1:
+                    retval += _gen_numeric_sql(search_str[constraint], v[i])
+                    if i != len(v) - 1:
                         retval += " OR "
                 return retval
             else:
                 # The query gave a single value
-                #return _gen_numeric_sql(search_str[constraint], value)
+                # return _gen_numeric_sql(search_str[constraint], value)
                 return _gen_str_sql(search_str[constraint], value)
 
     def _gen_sql(self, payload):
