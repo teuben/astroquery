@@ -7,13 +7,17 @@ from unittest.mock import patch, Mock
 
 from astropy import units as u
 from astropy import coordinates as coord
+from astropy import wcs
 from astropy.table import Table
+from astropy.io import votable
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
+import pyvo
 
 from astroquery.alma import Alma
-from astroquery.alma.core import _gen_sql, _OBSCORE_TO_ALMARESULT
+from astroquery.alma.core import _gen_sql, _OBSCORE_TO_ALMARESULT, get_enhanced_table
 from astroquery.alma.tapsql import _val_parse
+
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
 
@@ -107,7 +111,7 @@ def test_gen_pos_sql():
         "-90.0,4.338888888888889), s_region) = 1)"
     assert _gen_sql({'ra_dec': '!(10..20) >60'}) == common_select + \
         "((INTERSECTS(RANGE_S2D(0.0,10.0,60.0,90.0), s_region) = 1) OR " \
-        "(INTERSECTS(RANGE_S2D(20.0,0.0,60.0,90.0), s_region) = 1))"
+        "(INTERSECTS(RANGE_S2D(20.0,360.0,60.0,90.0), s_region) = 1))"
     assert _gen_sql({'ra_dec': '0..20|40..60 <-50|>50'}) == common_select + \
         "((INTERSECTS(RANGE_S2D(0.0,20.0,-90.0,-50.0), s_region) = 1) OR " \
         "(INTERSECTS(RANGE_S2D(0.0,20.0,50.0,90.0), s_region) = 1) OR " \
@@ -119,18 +123,23 @@ def test_gen_pos_sql():
     assert _gen_sql({'galactic': '1 2, 3'}) == common_select + "(INTERSECTS(" \
         "CIRCLE('ICRS',{},{},3.0), s_region) = 1)".format(
         center.icrs.ra.to(u.deg).value, center.icrs.dec.to(u.deg).value)
-    min_point = coord.SkyCoord('12:13:14.0', '-00:01:02.1', unit=u.deg,
-                               frame='galactic')
-    max_point = coord.SkyCoord('12:14:14.0', '-00:00:02.1', unit=(u.deg, u.deg),
-                               frame='galactic')
+    gal_longitude = ('12:13:14.0', '12:14:14.0')
+    gal_latitude = ('-00:01:02.1', '-00:00:02.1')
+    min_pt = coord.SkyCoord(gal_longitude[0], gal_latitude[0], unit=u.deg)
+    long_min, lat_min = min_pt.ra.value, min_pt.dec.value
+    max_pt = coord.SkyCoord(gal_longitude[1], gal_latitude[1], unit=u.deg)
+    long_max, lat_max = max_pt.ra.value, max_pt.dec.value
     assert _gen_sql(
-        {'galactic': '12:13:14.0..12:14:14.0 -00:01:02.1..-00:00:02.1'}) == \
+        {'galactic': '{}..{} {}..{}'.format(
+            gal_longitude[0], gal_longitude[1], gal_latitude[0], gal_latitude[1])}) == \
         common_select +\
-        "(INTERSECTS(RANGE_S2D({},{},{},{}), s_region) = 1)".format(
-            min_point.icrs.ra.to(u.deg).value,
-            max_point.icrs.ra.to(u.deg).value,
-            min_point.icrs.dec.to(u.deg).value,
-            max_point.icrs.dec.to(u.deg).value)
+        'gal_longitude>={} AND gal_longitude<={} AND gal_latitude>={} AND gal_latitude<={}'.format(
+            long_min, long_max, lat_min, lat_max)
+
+    # test extremities
+    assert _gen_sql({'galactic': '0..360 -90..90'}) == \
+        common_select + ('gal_longitude>=0.0 AND gal_longitude<=360.0 AND '
+                         'gal_latitude>=-90.0 AND gal_latitude<=90.0')
 
     # combination of frames
     center = coord.SkyCoord(1, 2, unit=u.deg, frame='galactic')
@@ -173,6 +182,16 @@ def test_gen_str_sql():
         "(proposal_id LIKE '2012.%' OR proposal_id LIKE '2013._3%')"
 
 
+def test_gen_array_sql():
+    # test string array input (regression in #2094)
+    # string arrays should be OR'd together
+    common_select = "select * from ivoa.obscore WHERE "
+    test_keywords = ["High-mass star formation", "Disks around high-mass stars"]
+    assert (_gen_sql({"spatial_resolution": "<0.1", "science_keyword": test_keywords})
+            == common_select + ("spatial_resolution<=0.1 AND (science_keyword='High-mass star formation' "
+                                "OR science_keyword='Disks around high-mass stars')"))
+
+
 def test_gen_datetime_sql():
     common_select = 'select * from ivoa.obscore WHERE '
     assert _gen_sql({'start_date': '01-01-2020'}) == common_select + \
@@ -183,20 +202,6 @@ def test_gen_datetime_sql():
         "t_min<=58849.0"
     assert _gen_sql({'start_date': '(01-01-2020 .. 01-02-2020)'}) == \
         common_select + "(58849.0<=t_min AND t_min<=58880.0)"
-
-
-def test_gen_spec_res_sql():
-    common_select = 'select * from ivoa.obscore WHERE '
-    assert _gen_sql({'spectral_resolution': 70}) == common_select + \
-        "em_resolution=20985472.06"
-    assert _gen_sql({'spectral_resolution': '<70'}) == common_select + \
-        "em_resolution>=20985472.06"
-    assert _gen_sql({'spectral_resolution': '>70'}) == common_select + \
-        "em_resolution<=20985472.06"
-    assert _gen_sql({'spectral_resolution': '(70 .. 80)'}) == common_select + \
-        "(23983396.64<=em_resolution AND em_resolution<=20985472.06)"
-    assert _gen_sql({'spectral_resolution': '(70|80)'}) == common_select + \
-        "(em_resolution=20985472.06 OR em_resolution=23983396.64)"
 
 
 def test_gen_public_sql():
@@ -233,6 +238,18 @@ def test_pol_sql():
         common_select + " WHERE (pol_states='/XX/' OR pol_states='/XX/YY/')"
 
 
+def test_unused_args():
+    alma = Alma()
+    alma._get_dataarchive_url = Mock()
+    # with patch('astroquery.alma.tapsql.coord.SkyCoord.from_name') as name_mock, pytest.raises(TypeError) as typeError:
+    with patch('astroquery.alma.tapsql.coord.SkyCoord.from_name') as name_mock:
+        with pytest.raises(TypeError) as typeError:
+            name_mock.return_value = SkyCoord(1, 2, unit='deg')
+            alma.query_object('M13', public=False, bogus=True, nope=False, band_list=[3])
+
+        assert "['bogus -> True', 'nope -> False']" in str(typeError.value)
+
+
 def test_query():
     # Tests the query and return values
     tap_mock = Mock()
@@ -252,7 +269,7 @@ def test_query():
         "select * from ivoa.obscore WHERE "
         "(INTERSECTS(CIRCLE('ICRS',1.0,2.0,1.0), s_region) = 1) "
         "AND science_observation='T' AND data_rights='Public'",
-        language='ADQL', maxrec=None)
+        language='ADQL', maxrec=None, uploads=None)
 
     # one row result
     tap_mock = Mock()
@@ -274,7 +291,7 @@ def test_query():
         "(INTERSECTS(CIRCLE('ICRS',1.0,2.0,0.16666666666666666), s_region) = 1) "
         "AND band_list LIKE '%3%' AND science_observation='T' AND "
         "data_rights='Proprietary'",
-        language='ADQL', maxrec=None)
+        language='ADQL', maxrec=None, uploads=None)
 
     # repeat for legacy columns
     mock_result = Mock()
@@ -296,7 +313,7 @@ def test_query():
         "(INTERSECTS(CIRCLE('ICRS',1.0,2.0,0.16666666666666666), s_region) = 1) "
         "AND band_list LIKE '%3%' AND science_observation='T' AND "
         "data_rights='Proprietary'",
-        language='ADQL', maxrec=None)
+        language='ADQL', maxrec=None, uploads=None)
     row_legacy = result_legacy[0]
     row = result[0]
     for item in _OBSCORE_TO_ALMARESULT.items():
@@ -330,8 +347,117 @@ def test_query():
         "(band_list LIKE '%1%' OR band_list LIKE '%3%') AND "
         "t_min=55197.0 AND pol_states='/XX/YY/' AND s_fov=0.012313 AND "
         "t_exptime=25 AND science_observation='F'",
-        language='ADQL', maxrec=None
+        language='ADQL', maxrec=None, uploads=None
     )
+
+    tap_mock.reset()
+    result = alma.query_region('1 2', radius=1*u.deg,
+                               payload={'em_resolution': 6.929551916151968e-05,
+                                        'spectral_resolution': 2000000}
+                               )
+    assert len(result) == 0
+    tap_mock.search.assert_called_with(
+        "select * from ivoa.obscore WHERE em_resolution=6.929551916151968e-05 "
+        "AND spectral_resolution=2000000 "
+        "AND (INTERSECTS(CIRCLE('ICRS',1.0,2.0,1.0), "
+        "s_region) = 1) AND science_observation='T' AND data_rights='Public'",
+        language='ADQL', maxrec=None, uploads=None)
+
+
+@pytest.mark.filterwarnings("ignore::astropy.utils.exceptions.AstropyUserWarning")
+def test_enhanced_table():
+    pytest.importorskip('regions')
+    import regions  # to silence checkstyle
+    data = votable.parse(os.path.join(DATA_DIR, 'alma-shapes.xml'))
+    result = pyvo.dal.DALResults(data)
+    assert len(result) == 5
+    enhanced_result = get_enhanced_table(result)
+    assert len(enhanced_result) == 5
+    # generic ALMA WCS
+    ww = wcs.WCS(naxis=2)
+    ww.wcs.crpix = [250.0, 250.0]
+    ww.wcs.cdelt = [-7.500000005754e-05, 7.500000005754e-05]
+    ww.wcs.ctype = ['RA---SIN', 'DEC--SIN']
+    for row in enhanced_result:
+        # check other quantities
+        assert row['s_ra'].unit == u.deg
+        assert row['s_dec'].unit == u.deg
+        assert row['frequency'].unit == u.GHz
+        ww.wcs.crval = [row['s_ra'].value, row['s_dec'].value]
+        sky_center = SkyCoord(row['s_ra'].value, row['s_dec'].value, unit=u.deg)
+        pix_center = regions.PixCoord.from_sky(sky_center, ww)
+        s_region = row['s_region']
+        pix_region = s_region.to_pixel(ww)
+        if isinstance(s_region, regions.CircleSkyRegion):
+            # circle: https://almascience.org/aq/?mous=uid:%2F%2FA001%2FX1284%2FX146e
+            assert s_region.center.name == 'icrs'
+            assert s_region.center.ra.value == 337.250736
+            assert s_region.center.ra.unit == u.deg
+            assert s_region.center.dec.value == -69.175076
+            assert s_region.center.dec.unit == u.deg
+            assert s_region.radius.unit == u.deg
+            assert s_region.radius.value == 0.008223
+            x_min = pix_region.center.x - pix_region.radius
+            x_max = pix_region.center.x + pix_region.radius
+            y_min = pix_region.center.y - pix_region.radius
+            y_max = pix_region.center.y + pix_region.radius
+            assert pix_region.contains(pix_center)
+        elif isinstance(s_region, regions.PolygonSkyRegion):
+            # simple polygon: https://almascience.org/aq/?mous=uid:%2F%2FA001%2FX1296%2FX193
+            assert s_region.vertices.name == 'icrs'
+            x_min = pix_region.vertices.x.min()
+            x_max = pix_region.vertices.x.max()
+            y_min = pix_region.vertices.y.min()
+            y_max = pix_region.vertices.y.max()
+            assert pix_region.contains(pix_center)
+        elif isinstance(s_region, regions.CompoundSkyRegion):
+            x_min = pix_region.bounding_box.ixmin
+            x_max = pix_region.bounding_box.ixmax
+            y_min = pix_region.bounding_box.iymin
+            y_max = pix_region.bounding_box.iymax
+            if row['obs_publisher_did'] == 'ADS/JAO.ALMA#2013.1.01014.S':
+                # Union type of footprint: https://almascience.org/aq/?mous=uid:%2F%2FA001%2FX145%2FX3d6
+                # image center is outside
+                assert not pix_region.contains(pix_center)
+                # arbitrary list of points inside each of the 4 polygons
+                inside_pts = ['17:46:43.655 -28:41:43.956',
+                              '17:45:06.173 -29:04:01.549',
+                              '17:44:53.675 -29:09:19.382',
+                              '17:44:38.584 -29:15:31.836']
+                for inside in [SkyCoord(coords, unit=(u.hourangle, u.deg)) for coords in inside_pts]:
+                    pix_inside = regions.PixCoord.from_sky(inside, ww)
+                    assert pix_region.contains(pix_inside)
+            elif row['obs_publisher_did'] == 'ADS/JAO.ALMA#2016.1.00298.S':
+                # pick random points inside and outside
+                inside = SkyCoord('1:38:44 10:18:55', unit=(u.hourangle, u.deg))
+                hole = SkyCoord('1:38:44 10:19:31.5', unit=(u.hourangle, u.deg))
+                pix_inside = regions.PixCoord.from_sky(inside, ww)
+                pix_outside = regions.PixCoord.from_sky(hole, ww)
+                assert pix_region.contains(pix_inside)
+                # assert not pix_region.contains(pix_outside)
+            else:
+                # polygon with "hole": https://almascience.org/aq/?mous=uid:%2F%2FA001%2FX158f%2FX745
+                assert pix_region.contains(pix_center)
+                # this is an arbitrary point in the footprint "hole"
+                outside_point = SkyCoord('03:32:38.689 -27:47:32.750',
+                                         unit=(u.hourangle, u.deg))
+                pix_outside = regions.PixCoord.from_sky(outside_point, ww)
+                assert not pix_region.contains(pix_outside)
+        else:
+            assert False, "Unsupported shape"
+        assert x_min <= x_max
+        assert y_min <= y_max
+
+        #  example of how to plot the footprints
+        #  artist = pix_region.as_artist()
+        #  import matplotlib.pyplot as plt
+        #  axes = plt.subplot(projection=ww)
+        #  axes.set_aspect('equal')
+        #  axes.add_artist(artist)
+        #  axes.set_xlim([x_min, x_max])
+        #  axes.set_ylim([y_min, y_max])
+        #  pix_region.plot()
+        #  plt.show()
 
 
 def test_sia():
@@ -373,24 +499,151 @@ def test_tap():
     alma._tap = tap_mock
     result = alma.query_tap('select * from ivoa.ObsCore')
     assert len(result.table) == 0
-
     tap_mock.search.assert_called_once_with('select * from ivoa.ObsCore',
-                                            language='ADQL', maxrec=None)
+                                            language='ADQL', maxrec=None, uploads=None)
+
+    tap_mock.search.reset_mock()
+    result = alma.query_tap('select * from ivoa.ObsCore', maxrec=10, uploads={'tmptable': 'votable_file.xml'})
+    assert len(result.table) == 0
+    tap_mock.search.assert_called_once_with(
+        'select * from ivoa.ObsCore', language='ADQL', maxrec=10, uploads={'tmptable': 'votable_file.xml'})
+
+
+@pytest.mark.parametrize('data_archive_url',
+                         [
+                             ('https://almascience.nrao.edu'),
+                             ('https://almascience.eso.org'),
+                             ('https://almascience.nao.ac.jp')
+                         ])
+def test_tap_url(data_archive_url):
+    _test_tap_url(data_archive_url)
+
+
+def _test_tap_url(data_archive_url):
+    alma = Alma()
+    alma._get_dataarchive_url = Mock(return_value=data_archive_url)
+    alma._get_dataarchive_url.reset_mock()
+    assert alma.tap_url == f"{data_archive_url}/tap"
+
+
+@pytest.mark.parametrize('data_archive_url',
+                         [
+                             ('https://almascience.nrao.edu'),
+                             ('https://almascience.eso.org'),
+                             ('https://almascience.nao.ac.jp')
+                         ])
+def test_sia_url(data_archive_url):
+    _test_sia_url(data_archive_url)
+
+
+def _test_sia_url(data_archive_url):
+    alma = Alma()
+    alma._get_dataarchive_url = Mock(return_value=data_archive_url)
+    alma._get_dataarchive_url.reset_mock()
+    assert alma.sia_url == f"{data_archive_url}/sia2"
+
+
+@pytest.mark.parametrize('data_archive_url',
+                         [
+                             ('https://almascience.nrao.edu'),
+                             ('https://almascience.eso.org'),
+                             ('https://almascience.nao.ac.jp')
+                         ])
+def test_datalink_url(data_archive_url):
+    _test_datalink_url(data_archive_url)
+
+
+def _test_datalink_url(data_archive_url):
+    alma = Alma()
+    alma._get_dataarchive_url = Mock(return_value=data_archive_url)
+    alma._get_dataarchive_url.reset_mock()
+    assert alma.datalink_url == f"{data_archive_url}/datalink/sync"
 
 
 def test_get_data_info():
-    datalink_mock = Mock()
-    dl_result = Table.read(data_path('alma-datalink.xml'), format='votable')
-    mock_response = Mock(to_table=Mock(return_value=dl_result))
-    mock_response.status = ['OK']
-    datalink_mock.run_sync.return_value = mock_response
+    class MockDataLinkService:
+        def run_sync(self, uid):
+            return _mocked_datalink_sync(uid)
+
     alma = Alma()
     alma._get_dataarchive_url = Mock()
-    alma._datalink = datalink_mock
+    alma._datalink = MockDataLinkService()
     result = alma.get_data_info(uids='uid://A001/X12a3/Xe9')
-    assert len(result) == 7
+    assert len(result) == 9
 
-    datalink_mock.run_sync.assert_called_once_with('uid://A001/X12a3/Xe9')
+
+# This method will be used by the mock in test_get_data_info_expand_tarfiles to replace requests.get
+def _mocked_datalink_sync(*args, **kwargs):
+    class MockResponse:
+        adhoc_service_1_param1 = type('', (object, ), {'ID': 'standardID',
+                                      'value': 'ivo://ivoa.net/std/DataLink#links-1.0'})()
+        adhoc_service_1_param2 = type(
+            '', (object, ), {
+                'ID': 'accessURL',
+                'value': 'https://almascience.org/datalink/sync?ID=2017.1.01185.S_uid___A001_X12a3_Xe9_001_of_001.tar'}
+        )()
+        adhoc_service_1 = type(
+            '', (object, ), {
+                'ID': 'DataLink.2017.1.01185.S_uid___A001_X12a3_Xe9_001_of_001.tar', 'params': [
+                    adhoc_service_1_param1, adhoc_service_1_param2]})()
+
+        adhoc_service_2_param1 = type('', (object, ), {'ID': 'standardID',
+                                      'value': 'ivo://ivoa.net/std/DataLink#links-1.0'})()
+        adhoc_service_2_param2 = type(
+            '', (object, ), {
+                'ID': 'accessURL',
+                'value': 'https://almascience.org/datalink/sync?ID=2017.1.01185.S_uid___A001_X12a3_Xe9_auxiliary.tar'}
+        )()
+        adhoc_service_2 = type(
+            '', (object, ), {
+                'ID': 'DataLink.2017.1.01185.S_uid___A001_X12a3_Xe9_auxiliary.tar', 'params': [
+                    adhoc_service_1_param1, adhoc_service_1_param2]})()
+
+        adhoc_services = {
+            'DataLink.2017.1.01185.S_uid___A001_X12a3_Xe9_001_of_001.tar': adhoc_service_1,
+            'DataLink.2017.1.01185.S_uid___A001_X12a3_Xe9_auxiliary.tar': adhoc_service_2
+        }
+
+        def __init__(self, table):
+            self.table = table
+
+        def to_table(self):
+            return self.table
+
+        @property
+        def status(self):
+            return ['OK']
+
+        def iter_adhocservices(self):
+            return [self.adhoc_service_1, self.adhoc_service_2]
+
+        def get_adhocservice_by_id(self, adhoc_service_id):
+            return self.adhoc_services[adhoc_service_id]
+
+    print(f"\n\nFOUND ARGS {args}\n\n")
+
+    if args[0] == 'uid://A001/X12a3/Xe9':
+        return MockResponse(Table.read(data_path('alma-datalink.xml'), format='votable'))
+    elif args[0] == '2017.1.01185.S_uid___A001_X12a3_Xe9_001_of_001.tar':
+        return MockResponse(Table.read(data_path('alma-datalink-recurse-this.xml'), format='votable'))
+    elif args[0] == '2017.1.01185.S_uid___A001_X12a3_Xe9_auxiliary.tar':
+        return MockResponse(Table.read(data_path('alma-datalink-recurse-aux.xml'), format='votable'))
+
+    pytest.fail('Should not get here.')
+
+
+# @patch('pyvo.dal.adhoc.DatalinkService', side_effect=_mocked_datalink_sync)
+def test_get_data_info_expand_tarfiles():
+    class MockDataLinkService:
+        def run_sync(self, uid):
+            return _mocked_datalink_sync(uid)
+
+    alma = Alma()
+    alma._datalink = MockDataLinkService()
+    result = alma.get_data_info(uids='uid://A001/X12a3/Xe9', expand_tarfiles=True)
+
+    # Entire expanded structure is 19 links long.
+    assert len(result) == 19
 
 
 def test_galactic_query():
@@ -409,7 +662,7 @@ def test_galactic_query():
     result = alma.query_region(SkyCoord(0*u.deg, 0*u.deg, frame='galactic'),
                                radius=1*u.deg, get_query_payload=True)
 
-    assert result['ra_dec'] == SkyCoord(0*u.deg, 0*u.deg, frame='galactic').icrs.to_string() + ", 1.0"
+    assert "'ICRS',266.405,-28.9362,1.0" in result
 
 
 def test_download_files():

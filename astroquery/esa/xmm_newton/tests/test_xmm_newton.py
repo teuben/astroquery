@@ -1,23 +1,27 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """
-@author: Elena Colomo
-@contact: ecolomo@esa.int
+====================
+XMM-Newton Tap Tests
+====================
+
 European Space Astronomy Centre (ESAC)
 European Space Agency (ESA)
-Created on 4 Sept. 2019
+
 """
+import errno
+import os
+import shutil
+import tarfile
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-import tarfile
-import os
-import errno
-import shutil
+from astropy.io import fits
 
-from ..core import XMMNewtonClass
-from ..tests.dummy_tap_handler import DummyXMMNewtonTapHandler
-from ..tests.dummy_handler import DummyHandler
 from astroquery.exceptions import LoginError
+from astroquery.esa.xmm_newton.core import XMMNewtonClass
+from .dummy_handler import DummyHandler
+from .dummy_tap_handler import DummyXMMNewtonTapHandler
 
 
 def data_path(filename):
@@ -25,7 +29,7 @@ def data_path(filename):
     return os.path.join(data_dir, filename)
 
 
-class mockResponse():
+class mockResponse:
     headers = {'Date': 'Wed, 24 Nov 2021 13:43:50 GMT',
                'Server': 'Apache/2.4.6 (Red Hat Enterprise Linux) OpenSSL/1.0.2k-fips',
                'Content-Disposition': 'inline; filename="0560181401.tar.gz"',
@@ -38,7 +42,7 @@ class mockResponse():
         pass
 
 
-class TestXMMNewton():
+class TestXMMNewton:
     def get_dummy_tap_handler(self):
         parameters = {'query': "select top 10 * from v_public_observations",
                       'output_file': "test2.vot",
@@ -97,10 +101,11 @@ class TestXMMNewton():
         dummyHandler.check_parameters(parameters2, "get_columns")
         dummyHandler.reset()
 
-    def test_parse_filename(self):
-        self._create_tar("filename.tar", self._files)
+    def test_parse_filename(self, tmp_path):
+        filename = Path(tmp_path, "filename.tar")
+        self._create_tar(filename, self._files)
         xsa = XMMNewtonClass(self.get_dummy_tap_handler())
-        with tarfile.open("filename.tar", "r") as tar:
+        with tarfile.open(filename, "r") as tar:
             for i in tar.getmembers():
                 paths = os.path.split(i.name)
                 fname = paths[1]
@@ -292,10 +297,10 @@ class TestXMMNewton():
                     shutil.rmtree(os.path.join(ob_name, ftype))
                 shutil.rmtree(ob_name)
 
-    def test_create_tar_lightcurves(self):
-        _tarname = "tarfile_lightcurves.tar"
-        self._create_tar_lightcurves(_tarname, self._files_lightcurves)
-        assert os.path.isfile(_tarname)
+    def test_create_tar_lightcurves(self, tmp_path):
+        path = Path(tmp_path, "tarfile_lightcurves.tar")
+        self._create_tar_lightcurves(path, self._files_lightcurves)
+        assert os.path.isfile(path)
 
     def test_get_epic_spectra_non_existing_file(self, capsys):
         _tarname = "nonexistingfile.tar"
@@ -308,28 +313,27 @@ class TestXMMNewton():
         assert err == ("ERROR: File %s not found "
                        "[astroquery.esa.xmm_newton.core]\n" % _tarname)
 
-    def test_get_epic_spectra_invalid_instrumnet(self, capsys):
-        _tarname = "tarfile.tar"
+    def test_get_epic_spectra_invalid_instrumnet(self, tmp_path, capsys):
+        path = Path(tmp_path, "tarfile.tar")
         _invalid_instrument = "II"
         _source_number = 83
-        self._create_tar(_tarname, self._files)
+        self._create_tar(path, self._files)
         xsa = XMMNewtonClass(self.get_dummy_tap_handler())
-        res = xsa.get_epic_spectra(_tarname, _source_number,
+        res = xsa.get_epic_spectra(path, _source_number,
                                    instrument=[_invalid_instrument])
         assert res == {}
         out, err = capsys.readouterr()
         assert err == ("WARNING: Invalid instrument %s "
                        "[astroquery.esa.xmm_newton.core]\n"
                        % _invalid_instrument)
-        os.remove(_tarname)
 
-    def test_get_epic_spectra_invalid_source_number(self, capsys):
-        _tarname = "tarfile.tar"
+    def test_get_epic_spectra_invalid_source_number(self, tmp_path, capsys):
+        path = Path(tmp_path, "tarfile.tar")
         _invalid_source_number = 833
         _default_instrument = ['M1', 'M2', 'PN', 'EP']
-        self._create_tar(_tarname, self._files)
+        self._create_tar(path, self._files)
         xsa = XMMNewtonClass(self.get_dummy_tap_handler())
-        res = xsa.get_epic_spectra(_tarname, _invalid_source_number,
+        res = xsa.get_epic_spectra(path, _invalid_source_number,
                                    instrument=[])
         assert res == {}
         out, err = capsys.readouterr()
@@ -338,9 +342,8 @@ class TestXMMNewton():
                        "  Source Number: %u\n"
                        "  Instrument: %s\n"
                        " [astroquery.esa.xmm_newton.core]\n"
-                       % (_tarname, _invalid_source_number,
+                       % (path, _invalid_source_number,
                           _default_instrument))
-        os.remove(_tarname)
 
     def test_get_epic_images_non_existing_file(self, capsys):
         _tarname = "nonexistingfile.tar"
@@ -352,12 +355,12 @@ class TestXMMNewton():
         assert err == ("ERROR: File %s not found "
                        "[astroquery.esa.xmm_newton.core]\n" % _tarname)
 
-    def test_get_epic_images_invalid_instrument(self, capsys):
-        _tarname = "tarfile.tar"
+    def test_get_epic_images_invalid_instrument(self, tmp_path, capsys):
+        path = Path(tmp_path, "tarfile.tar")
         _invalid_instrument = "II"
-        self._create_tar(_tarname, self._files)
+        self._create_tar(path, self._files)
         xsa = XMMNewtonClass(self.get_dummy_tap_handler())
-        res = xsa.get_epic_images(_tarname,
+        res = xsa.get_epic_images(path,
                                   band=[], instrument=[_invalid_instrument],
                                   get_detmask=True, get_exposure_map=True)
         assert res == {}
@@ -365,31 +368,29 @@ class TestXMMNewton():
         assert err == ("WARNING: Invalid instrument %s "
                        "[astroquery.esa.xmm_newton.core]\n"
                        % _invalid_instrument)
-        os.remove(_tarname)
 
-    def test_get_epic_images_invalid_band(self, capsys):
-        _tarname = "tarfile.tar"
+    def test_get_epic_images_invalid_band(self, tmp_path, capsys):
+        path = Path(tmp_path, "tarfile.tar")
         _invalid_band = 10
-        self._create_tar(_tarname, self._files)
+        self._create_tar(path, self._files)
         xsa = XMMNewtonClass(self.get_dummy_tap_handler())
-        res = xsa.get_epic_images(_tarname,
+        res = xsa.get_epic_images(path,
                                   band=[_invalid_band], instrument=[],
                                   get_detmask=True, get_exposure_map=True)
         assert res == {}
         out, err = capsys.readouterr()
         assert err == ("WARNING: Invalid band %u "
                        "[astroquery.esa.xmm_newton.core]\n" % _invalid_band)
-        os.remove(_tarname)
 
-    def test_get_epic_images(self):
-        _tarname = "tarfile.tar"
+    def test_get_epic_images(self, tmp_path):
+        path = Path(tmp_path, "tarfile.tar")
         _instruments = ["M1", "M1_expo", "M1_det",
                         "M2", "M2_expo", "M2_det",
                         "PN", "PN_expo", "PN_det",
                         "EP", "EP_expo", "EP_det"]
-        self._create_tar(_tarname, self._files)
+        self._create_tar(path, self._files)
         xsa = XMMNewtonClass(self.get_dummy_tap_handler())
-        res = xsa.get_epic_images(_tarname, band=[], instrument=[],
+        res = xsa.get_epic_images(path, band=[], instrument=[],
                                   get_detmask=True, get_exposure_map=True)
         assert len(res) == 6  # Number of different bands
         assert len(res[1]) == 9  # Number of different inst within band 1
@@ -402,55 +403,55 @@ class TestXMMNewton():
         # an instrument
         for k, v in res[1].items():
             assert k in _instruments
-            if type(v) == str:
+            if isinstance(v, str):
                 f = os.path.split(v)
                 assert f[1] in self._files["0405320501"]["pps"]
-            if type(v) == list:
+            if isinstance(v, list):
                 for i in v:
                     f = os.path.split(i)
                     assert f[1] in self._files["0405320501"]["pps"]
         for k, v in res[2].items():
             assert k in _instruments
-            if type(v) == str:
+            if isinstance(v, str):
                 f = os.path.split(v)
                 assert f[1] in self._files["0405320501"]["pps"]
-            if type(v) == list:
+            if isinstance(v, list):
                 for i in v:
                     f = os.path.split(i)
                     assert f[1] in self._files["0405320501"]["pps"]
         for k, v in res[3].items():
             assert k in _instruments
-            if type(v) == str:
+            if isinstance(v, str):
                 f = os.path.split(v)
                 assert f[1] in self._files["0405320501"]["pps"]
-            if type(v) == list:
+            if isinstance(v, list):
                 for i in v:
                     f = os.path.split(i)
                     assert f[1] in self._files["0405320501"]["pps"]
         for k, v in res[4].items():
             assert k in _instruments
-            if type(v) == str:
+            if isinstance(v, str):
                 f = os.path.split(v)
                 assert f[1] in self._files["0405320501"]["pps"]
-            if type(v) == list:
+            if isinstance(v, list):
                 for i in v:
                     f = os.path.split(i)
                     assert f[1] in self._files["0405320501"]["pps"]
         for k, v in res[5].items():
             assert k in _instruments
-            if type(v) == str:
+            if isinstance(v, str):
                 f = os.path.split(v)
                 assert f[1] in self._files["0405320501"]["pps"]
-            if type(v) == list:
+            if isinstance(v, list):
                 for i in v:
                     f = os.path.split(i)
                     assert f[1] in self._files["0405320501"]["pps"]
         for k, v in res[8].items():
             assert k in _instruments
-            if type(v) == str:
+            if isinstance(v, str):
                 f = os.path.split(v)
                 assert f[1] in self._files["0405320501"]["pps"]
-            if type(v) == list:
+            if isinstance(v, list):
                 for i in v:
                     f = os.path.split(i)
                     assert f[1] in self._files["0405320501"]["pps"]
@@ -461,23 +462,18 @@ class TestXMMNewton():
                 assert os.path.isdir(os.path.join(ob, t))
                 for b in res:
                     for i in res[b]:
-                        if type(res[b][i]) == str:
+                        if isinstance(res[b][i], str):
                             assert os.path.isfile(res[b][i])
-                        if type(res[b][i]) == list:
+                        if isinstance(res[b][i], list):
                             for f in res[b][i]:
                                 assert os.path.isfile(f)
 
-        # Removing files created in this test
-        for ob_name in self._files:
-            shutil.rmtree(ob_name)
-        os.remove(_tarname)
-
-    def test_get_epic_lightcurve(self):
-        _tarname = "tarfile.tar"
-        self._create_tar(_tarname, self._files)
+    def test_get_epic_lightcurve(self, tmp_path):
+        path = Path(tmp_path, "tarfile.tar")
+        self._create_tar(path, self._files)
         _source_number = 1
         xsa = XMMNewtonClass(self.get_dummy_tap_handler())
-        res = xsa.get_epic_lightcurve(_tarname, _source_number,
+        res = xsa.get_epic_lightcurve(path, _source_number,
                                       instrument=['M1', 'M2', 'PN'])
         assert res == {}
 
@@ -492,27 +488,26 @@ class TestXMMNewton():
         assert err == ("ERROR: File %s not found "
                        "[astroquery.esa.xmm_newton.core]\n" % _tarname)
 
-    def test_get_epic_lightcurve_invalid_instrument(self, capsys):
-        _tarname = "tarfile.tar"
+    def test_get_epic_lightcurve_invalid_instrument(self, tmp_path, capsys):
+        path = Path(tmp_path, "tarfile.tar")
         _invalid_instrument = "II"
-        self._create_tar(_tarname, self._files)
+        self._create_tar(path, self._files)
         xsa = XMMNewtonClass(self.get_dummy_tap_handler())
-        res = xsa.get_epic_images(_tarname, [], [_invalid_instrument],
+        res = xsa.get_epic_images(path, [], [_invalid_instrument],
                                   get_detmask=True, get_exposure_map=True)
         assert res == {}
         out, err = capsys.readouterr()
         assert err == ("WARNING: Invalid instrument %s "
                        "[astroquery.esa.xmm_newton.core]\n"
                        % _invalid_instrument)
-        os.remove(_tarname)
 
-    def test_get_epic_lightcurve_invalid_source_number(self, capsys):
-        _tarname = "tarfile.tar"
+    def test_get_epic_lightcurve_invalid_source_number(self, tmp_path, capsys):
+        path = Path(tmp_path, "tarfile.tar")
         _invalid_source_number = 833
         _default_instrument = ['M1', 'M2', 'PN', 'EP']
-        self._create_tar(_tarname, self._files)
+        self._create_tar(path, self._files)
         xsa = XMMNewtonClass(self.get_dummy_tap_handler())
-        res = xsa.get_epic_lightcurve(_tarname, _invalid_source_number,
+        res = xsa.get_epic_lightcurve(path, _invalid_source_number,
                                       instrument=[])
         assert res == {}
         out, err = capsys.readouterr()
@@ -521,9 +516,8 @@ class TestXMMNewton():
                        "  Source Number: %u\n"
                        "  Instrument: %s\n"
                        " [astroquery.esa.xmm_newton.core]\n"
-                       % (_tarname, _invalid_source_number,
+                       % (path, _invalid_source_number,
                           _default_instrument))
-        os.remove(_tarname)
 
     def test_create_link(self):
         xsa = XMMNewtonClass(self.get_dummy_tap_handler())

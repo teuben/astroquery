@@ -11,6 +11,7 @@ import astropy.io.fits as fits
 
 from astroquery.exceptions import NoResultsWarning
 
+
 __all__ = ['query', 'save_file', 'get_file']
 id_parse = re.compile(r'ID\=(\d+)')
 
@@ -20,7 +21,7 @@ __doctest_skip__ = ['query', 'save_file', 'get_file']
 uri = 'https://sha.ipac.caltech.edu/applications/Spitzer/SHA/servlet/DataService?'
 
 
-def query(coord=None, ra=None, dec=None, size=None, naifid=None, pid=None,
+def query(*, coord=None, ra=None, dec=None, size=None, naifid=None, pid=None,
           reqkey=None, dataset=2, verbosity=3, return_response=False,
           return_payload=False):
     """
@@ -156,7 +157,7 @@ def query(coord=None, ra=None, dec=None, size=None, naifid=None, pid=None,
     return table
 
 
-def save_file(url, out_dir='sha_tmp/', out_name=None):
+def save_file(url, *, out_dir='sha_tmp/', out_name=None):
     """
     Download image to output directory given a URL from a SHA query.
 

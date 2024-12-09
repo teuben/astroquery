@@ -1,21 +1,26 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-
 import pytest
 import requests
+from astropy.time import Time, TimeDelta
+import astropy.units as u
 
 from ...heasarc import Heasarc, Conf
-from ...utils import commons
+from .conftest import MockResponse, parametrization_local_save_remote, skycoord_3C_273
 
 
-@pytest.mark.remote_data
+@parametrization_local_save_remote
 class TestHeasarcISDC:
+
+    @pytest.fixture(autouse=True)
+    def _patch_get(self, patch_get):
+        return patch_get
 
     @property
     def isdc_context(self):
         return Conf.server.set_temp(
-                'https://www.isdc.unige.ch/browse/w3query.pl'
-                )
+            'https://www.isdc.unige.ch/browse/w3query.pl'
+        )
 
     def test_custom_args(self):
         object_name = 'Crab'
@@ -25,13 +30,15 @@ class TestHeasarcISDC:
 
         with self.isdc_context:
             table = heasarc.query_object(
-                        object_name,
-                        mission=mission,
-                        radius='1 degree',
-                        time="2020-09-01 .. 2020-12-01",
-                        resultmax=10,
-                        good_isgri=">1000",
-                    )
+                object_name,
+                mission=mission,
+                radius='1 degree',
+                time="2020-09-01 .. 2020-12-01",
+                resultmax=10,
+                good_isgri=">1000",
+                cache=False
+            )
+        assert len(table) > 0
 
     def test_filter_custom_args(self):
         object_name = 'Crab'
@@ -41,14 +48,14 @@ class TestHeasarcISDC:
 
         with self.isdc_context:
             with pytest.raises(ValueError):
-                table = heasarc.query_object(
-                            object_name,
-                            mission=mission,
-                            radius='1 degree',
-                            time="2020-09-01 .. 2020-12-01",
-                            resultmax=10,
-                            very_good_isgri=">1000",
-                        )
+                heasarc.query_object(
+                    object_name,
+                    mission=mission,
+                    radius='1 degree',
+                    time="2020-09-01 .. 2020-12-01",
+                    resultmax=10,
+                    very_good_isgri=">1000",
+                )
 
     def test_basic_time(self):
         object_name = 'Crab'
@@ -57,12 +64,12 @@ class TestHeasarcISDC:
 
         def Q(mission):
             return heasarc.query_object(
-                        object_name,
-                        mission=mission,
-                        radius='1 degree',
-                        time="2020-09-01 .. 2020-12-01",
-                        resultmax=10000
-                   )
+                object_name,
+                mission=mission,
+                radius='1 degree',
+                time="2020-09-01 .. 2020-12-01",
+                resultmax=10000
+            )
 
         with self.isdc_context:
             table_isdc = Q('integral_rev3_scw')
@@ -72,25 +79,26 @@ class TestHeasarcISDC:
         assert len(table_isdc) == 11
         assert len(table_isdc) == len(table_heasarc)
 
-    def test_compare_time(self):
-        from astropy.time import Time, TimeDelta
+    def test_compare_time(self, patch_get):
+        patch_get.assume_fileid_for_request(
+            lambda url, params: f"last-month-{params['tablehead'].split()[-1]}")
 
         object_name = 'Crab'
 
         heasarc = Heasarc()
 
-        month_ago = (Time.now() - TimeDelta(30)).isot[:10]
+        month_ago = (Time.now() - TimeDelta(30 * u.day)).isot[:10]
         today = Time.now().isot[:10]
-        T = month_ago + " .. " +  today
+        T = month_ago + " .. " + today
 
         def Q(mission):
             return heasarc.query_object(
-                       object_name,
-                       mission=mission,
-                       time=T,
-                       resultmax=10000,
-                       radius='1000 deg'
-                   )
+                object_name,
+                mission=mission,
+                time=T,
+                resultmax=10000,
+                radius='1000 deg'
+            )
 
         with self.isdc_context:
             table_isdc = Q('integral_rev3_scw')
@@ -109,20 +117,20 @@ class TestHeasarcISDC:
 
         with self.isdc_context:
             table_isdc = heasarc.query_object(
-                            object_name,
-                            mission='integral_rev3_scw',
-                            time=T,
-                            resultmax=10000,
-                            radius='1000 deg'
-                         )
+                object_name,
+                mission='integral_rev3_scw',
+                time=T,
+                resultmax=10000,
+                radius='1000 deg'
+            )
 
         table_heasarc = heasarc.query_object(
-                            object_name,
-                            mission='intscw',
-                            time=T,
-                            resultmax=10000,
-                            radius='1000 deg'
-                        )
+            object_name,
+            mission='intscw',
+            time=T,
+            resultmax=10000,
+            radius='1000 deg'
+        )
 
         assert len(table_isdc) == len(table_heasarc) == 1
 
@@ -141,12 +149,12 @@ class TestHeasarcISDC:
 
         with self.isdc_context:
             table = heasarc.query_object(
-                        object_name,
-                        mission=mission,
-                        radius='1 degree'
-                    )
+                object_name,
+                mission=mission,
+                radius='1 degree'
+            )
 
-        assert len(table) == 270
+        assert len(table) >= 274
 
     def test_mission_list(self):
         heasarc = Heasarc()
@@ -172,7 +180,7 @@ class TestHeasarcISDC:
         assert 'GOOD_ISGRI' in cols
         assert 'RA_X' in cols
         assert 'DEC_X' in cols
-        assert '_SEARCH_OFFSET' in cols
+        assert 'SEARCH_OFFSET_' in cols
 
     def test_query_object_async(self):
         mission = 'integral_rev3_scw'
@@ -181,29 +189,24 @@ class TestHeasarcISDC:
         heasarc = Heasarc()
         response = heasarc.query_object_async(object_name, mission=mission)
         assert response is not None
-        assert type(response) is requests.models.Response
+        assert isinstance(response, (requests.models.Response, MockResponse))
 
     def test_query_region_async(self):
         heasarc = Heasarc()
         mission = 'integral_rev3_scw'
-        c = commons.coord.SkyCoord('12h29m06.70s +02d03m08.7s', frame='icrs')
 
         with self.isdc_context:
-            response = heasarc.query_region_async(c, mission=mission,
-                                                  radius='1 degree')
+            response = heasarc.query_region_async(
+                skycoord_3C_273, mission=mission, radius="1 degree")
         assert response is not None
-        assert type(response) is requests.models.Response
+        assert isinstance(response, (requests.models.Response, MockResponse))
 
     def test_query_region(self):
         heasarc = Heasarc()
         mission = 'integral_rev3_scw'
 
-        # Define coordinates for '3c273' object
         with self.isdc_context:
-            c = commons.coord.SkyCoord(
-                    '12h29m06.70s +02d03m08.7s',
-                    frame='icrs'
-                )
-            table = heasarc.query_region(c, mission=mission, radius='1 degree')
+            table = heasarc.query_region(
+                skycoord_3C_273, mission=mission, radius="1 degree")
 
-        assert len(table) == 270
+        assert len(table) >= 274

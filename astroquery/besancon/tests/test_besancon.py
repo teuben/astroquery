@@ -3,7 +3,6 @@
 import os
 from contextlib import contextmanager
 import pytest
-from astropy.io.ascii.tests.common import assert_equal
 from ... import besancon
 from ...utils import commons
 from astroquery.utils.mocks import MockResponse
@@ -14,7 +13,7 @@ from astroquery.utils.mocks import MockResponse
 # assert os.path.exists('besancon_test.txt')
 #     B = asciitable.read('t/besancon_test.txt',
 #                         Reader=besancon.BesanconFixed, guess=False)
-#     assert_equal(len(B),12)
+#     assert len(B) == 12
 #
 # def test_basic():
 #     besancon_model = besancon.request_besancon(
@@ -44,8 +43,8 @@ def test_reader(filename, length, ncols, d1, mv1):
         data = f.read()
     B = besancon.core.parse_besancon_model_string(data)
     B.pprint()
-    assert_equal(len(B), length)
-    assert_equal(len(B.columns), ncols)
+    assert len(B) == length
+    assert len(B.columns) == ncols
     assert B['Dist'][0] == d1
     assert B['Mv'][0] == mv1
 
@@ -65,11 +64,10 @@ def patch_get_readable_fileobj(request):
         if isinstance(filename, str):
             if '1376235131.430670' in filename:
                 is_binary = kwargs.get('encoding', None) == 'binary'
-                file_obj = open(data_path('1376235131.430670.resu'),
-                                "r" + ('b' if is_binary else ''))
+                with open(data_path('1376235131.430670.resu'), "r" + ('b' if is_binary else '')) as file_obj:
+                    yield file_obj
         else:
-            file_obj = filename
-        yield file_obj
+            yield filename
 
     mp = request.getfixturevalue("monkeypatch")
 
@@ -80,7 +78,8 @@ def patch_get_readable_fileobj(request):
 
 def post_mockreturn(method, url, data, timeout=10, stream=True, **kwargs):
     filename = data_path('query_return.iframe.html')
-    content = open(filename, 'rb').read()
+    with open(filename, 'rb') as infile:
+        content = infile.read()
     return MockResponseBesancon(content, filename, **kwargs)
 
 
@@ -105,6 +104,6 @@ def test_default_params():
 class MockResponseBesancon(MockResponse):
 
     def __init__(self, content=None, url=None, headers={}, **kwargs):
-        super(MockResponseBesancon, self).__init__(content)
+        super().__init__(content)
         self.raw = url  # StringIO.StringIO(url)
         self.headers = headers

@@ -56,7 +56,8 @@ def get_mockreturn(self, method, url,
                    json=None):
     filename = data_path(DATA_FILES[(url,
                                      params and frozenset(params.items()))])
-    content = open(filename, 'rb').read()
+    with open(filename, 'rb') as infile:
+        content = infile.read()
     return MockResponse(
         content, url=url, headers=headers, stream=stream, auth=auth)
 
@@ -66,22 +67,22 @@ def test_list_missions(patch_get):
 
 
 def test_list_datasets(patch_get):
-    assert Ibe.list_datasets('ptf') == ['images']
+    assert Ibe.list_datasets(mission='ptf') == ['images']
 
 
 def test_list_tables(patch_get):
-    assert Ibe.list_tables('ptf', 'images') == ['level1', 'level2']
+    assert Ibe.list_tables(mission='ptf', dataset='images') == ['level1', 'level2']
 
 
 def test_get_columns(patch_get):
-    columns = Ibe.get_columns('ptf', 'images', 'level1')
+    columns = Ibe.get_columns(mission='ptf', dataset='images', table='level1')
     assert len(columns) == 173
     assert columns[0]['name'] == 'expid'
 
 
 def test_ibe_pos(patch_get):
     table = Ibe.query_region(
-        SkyCoord(148.969687 * u.deg, 69.679383 * u.deg),
+        coordinate=SkyCoord(148.969687 * u.deg, 69.679383 * u.deg),
         where='expid <= 43010')
     assert isinstance(table, Table)
     assert len(table) == 21
@@ -96,4 +97,4 @@ def test_ibe_field_id(patch_get):
 
 def test_deprecated_namespace_import_warning():
     with pytest.warns(DeprecationWarning):
-        import astroquery.ibe
+        import astroquery.ibe  # noqa: F401

@@ -8,37 +8,35 @@ import tarfile
 import string
 import requests
 import warnings
-from pkg_resources import resource_filename
+import importlib.resources as importlib_resources
+
 from bs4 import BeautifulSoup
 import pyvo
-
 from urllib.parse import urljoin
+
 from astropy.table import Table, Column, vstack
 from astroquery import log
-from astropy.utils import deprecated
 from astropy.utils.console import ProgressBar
-from astropy.utils.exceptions import AstropyDeprecationWarning
 from astropy import units as u
 from astropy.time import Time
-from pyvo.dal.sia2 import SIA_PARAMETERS_DESC
+from astropy.coordinates import SkyCoord
+
+from pyvo.dal.sia2 import SIA2_PARAMETERS_DESC, SIA2Service
 
 from ..exceptions import LoginError
 from ..utils import commons
 from ..utils.process_asyncs import async_to_sync
-from ..query import QueryWithLogin
-from .tapsql import _gen_pos_sql, _gen_str_sql, _gen_numeric_sql,\
-    _gen_band_list_sql, _gen_datetime_sql, _gen_pol_sql, _gen_pub_sql,\
-    _gen_science_sql, _gen_spec_res_sql, ALMA_DATE_FORMAT
+from ..query import BaseQuery, QueryWithLogin, BaseVOQuery
+from .tapsql import (_gen_pos_sql, _gen_str_sql, _gen_numeric_sql,
+                     _gen_band_list_sql, _gen_datetime_sql, _gen_pol_sql, _gen_pub_sql,
+                     _gen_science_sql, ALMA_DATE_FORMAT)
 from . import conf, auth_urls
-from astroquery.utils.commons import ASTROPY_LT_4_1
+from astroquery.exceptions import CorruptDataWarning
 
-__all__ = {'AlmaClass', 'ALMA_BANDS'}
+__all__ = {'AlmaClass', 'ALMA_BANDS', 'get_enhanced_table'}
 
 __doctest_skip__ = ['AlmaClass.*']
 
-ALMA_TAP_PATH = 'tap'
-ALMA_SIA_PATH = 'sia2'
-ALMA_DATALINK_PATH = 'datalink/sync'
 
 # Map from ALMA ObsCore result to ALMA original query result
 # The map is provided in order to preserve the name of the columns in the
@@ -53,7 +51,8 @@ _OBSCORE_TO_ALMARESULT = {
     'gal_latitude': 'Galactic latitude',
     'band_list': 'Band',
     's_region': 'Footprint',
-    'em_resolution': 'Frequency resolution',
+    'em_resolution': 'Frequency resolution (m)',
+    'spectral_resolution': 'Frequency resolution (Hz)',
     'antenna_arrays': 'Array',
     'is_mosaic': 'Mosaic',
     't_exptime': 'Integration',
@@ -113,7 +112,9 @@ ALMA_FORM_KEYS = {
         'Frequency (GHz)': ['frequency', 'frequency', _gen_numeric_sql],
         'Bandwidth (Hz)': ['bandwidth', 'bandwidth', _gen_numeric_sql],
         'Spectral resolution (KHz)': ['spectral_resolution',
-                                      'em_resolution', _gen_spec_res_sql],
+                                      'spectral_resolution', _gen_numeric_sql],
+        'Spectral resolution (m)': ['em_resolution',
+                                    'em_resolution', _gen_numeric_sql],
         'Band': ['band_list', 'band_list', _gen_band_list_sql]
     },
     'Time': {
@@ -137,7 +138,7 @@ ALMA_FORM_KEYS = {
     'Project': {
         'Project code': ['project_code', 'proposal_id', _gen_str_sql],
         'Project title': ['project_title', 'obs_title', _gen_str_sql],
-        'PI name': ['pi_name', 'obs_creator_name', _gen_str_sql],
+        'PI name': ['pi_name', 'pi_name', _gen_str_sql],
         'Proposal authors': ['proposal_authors', 'proposal_authors', _gen_str_sql],
         'Project abstract': ['project_abstract', 'proposal_abstract', _gen_str_sql],
         'Publication count': ['publication_count', 'NA', _gen_str_sql],
@@ -159,9 +160,23 @@ ALMA_FORM_KEYS = {
 }
 
 
+# used to lookup the TAP service on an ARC
+TAP_SERVICE_PATH = 'tap'
+
+# standard ID URI to look for when expanding TAR files
+DATALINK_STANDARD_ID = 'ivo://ivoa.net/std/DataLink#links-1.0'
+
+# used to lookup the DataLink service on an ARC
+DATALINK_SERVICE_PATH = 'datalink/sync'
+
+# used to lookup the SIA service on an ARC
+SIA_SERVICE_PATH = 'sia2'
+
+
 def _gen_sql(payload):
     sql = 'select * from ivoa.obscore'
     where = ''
+    unused_payload = payload.copy()
     if payload:
         for constraint in payload:
             for attrib_category in ALMA_FORM_KEYS.values():
@@ -170,18 +185,222 @@ def _gen_sql(payload):
                         # use the value and the second entry in attrib which
                         # is the new name of the column
                         val = payload[constraint]
-                        if constraint == 'em_resolution':
-                            # em_resolution does not require any transformation
-                            attrib_where = _gen_numeric_sql(constraint, val)
-                        else:
-                            attrib_where = attrib[2](attrib[1], val)
+                        attrib_where = attrib[2](attrib[1], val)
                         if attrib_where:
                             if where:
                                 where += ' AND '
                             else:
                                 where = ' WHERE '
                             where += attrib_where
+
+                        # Delete this key to see what's left over afterward
+                        #
+                        # Use pop to avoid the slight possibility of trying to remove
+                        # an already removed key
+                        unused_payload.pop(constraint)
+
+    if unused_payload:
+        # Left over (unused) constraints passed.  Let the user know.
+        remaining = [f'{p} -> {unused_payload[p]}' for p in unused_payload]
+        raise TypeError(f'Unsupported arguments were passed:\n{remaining}')
+
     return sql + where
+
+
+def get_enhanced_table(result):
+    """
+    Returns an enhanced table with quantities instead of values and regions for footprints.
+    Note that this function is dependent on the ``astropy`` - affiliated ``regions`` package.
+    """
+    try:
+        import regions
+    except ImportError:
+        print(
+            "Could not import astropy-regions, which is a requirement for get_enhanced_table function in alma."
+            "Please refer to http://astropy-regions.readthedocs.io/en/latest/installation.html for how to install it.")
+        raise
+
+    def _parse_stcs_string(input):
+        csys = 'icrs'
+
+        def _get_region(tokens):
+            if tokens[0] == 'polygon':
+                if csys == tokens[1].lower():
+                    tokens = tokens[2:]
+                else:
+                    tokens = tokens[1:]
+                points = SkyCoord(
+                    [(float(tokens[ii]), float(tokens[ii + 1])) * u.deg
+                     for ii in range(0, len(tokens), 2)], frame=csys)
+                return regions.PolygonSkyRegion(points)
+            elif tokens[0] == 'circle':
+                if csys == tokens[1].lower():
+                    tokens = tokens[2:]
+                else:
+                    tokens = tokens[1:]
+                return regions.CircleSkyRegion(
+                    SkyCoord(float(tokens[0]), float(tokens[1]), unit=u.deg),
+                    float(tokens[2]) * u.deg)
+            else:
+                raise ValueError("Unrecognized shape: " + tokens[0])
+        s_region = input.lower().strip()
+        if s_region.startswith('union'):
+            res = None
+            # skip the union operator
+            input_regions = s_region[s_region.index('(') + 1:s_region.rindex(
+                ')')].strip()
+            # omit the first char in the string to force it look for the second
+            # occurrence
+            last_pos = None
+            not_operation = False  # not operation - signals that the next substring is just the not operation
+            not_shape = False  # not shape - signals that the next substring is a not shape
+            for shape in re.finditer(r'not|polygon|circle', input_regions):
+                pos = shape.span()[0]
+                if last_pos is None:
+                    last_pos = pos
+                    continue  # this is the first elem
+                if shape.group() == 'not':
+                    not_operation = True
+                elif not_operation:
+                    not_shape = True
+                    not_operation = False
+                    last_pos = pos
+                    continue
+                if res is not None:
+                    next_shape = _get_region(
+                        input_regions[last_pos:pos - 1].strip(' ()').split())
+                    if not_shape:
+                        res = (res or next_shape) ^ next_shape
+                        not_shape = False
+                    else:
+                        res = res | next_shape
+                else:
+                    res = _get_region(
+                        input_regions[last_pos:pos - 1].strip().split())
+                last_pos = pos
+            if last_pos:
+                next_shape = _get_region(
+                    input_regions[last_pos:].strip(' ()').split())
+                res = res | next_shape
+            return res
+        elif 'not' in s_region:
+            # shape with "holes"
+            comps = s_region.split('not')
+            result = _get_region(comps[0].strip(' ()').split())
+            for comp in comps[1:]:
+                hole = _get_region(comp.strip(' ()').split())
+                result = (result or hole) ^ hole
+            return result
+        else:
+            return _get_region(s_region.split())
+    prep_table = result.to_qtable()
+    s_region_parser = None
+    for field in result.resultstable.fields:
+        if ('s_region' == field.ID) and \
+                ('obscore:Char.SpatialAxis.Coverage.Support.Area' == field.utype):
+            if 'adql:REGION' == field.xtype:
+                s_region_parser = _parse_stcs_string
+            # this is where to add other xtype parsers such as shape
+            break
+    if (s_region_parser):
+        for row in prep_table:
+            row['s_region'] = s_region_parser(row['s_region'])
+    return prep_table
+
+
+class AlmaAuth(BaseVOQuery, BaseQuery):
+    """Authentication session information for passing credentials to an OIDC instance
+
+    Assumes an OIDC system like Keycloak with a preconfigured client app called "oidc" to validate against.
+    This does not use Tokens in the traditional OIDC sense, but rather uses the Keycloak specific endpoint
+    to validate a username and password.  Passwords are then kept in a Python keyring.
+    """
+
+    _CLIENT_ID = 'oidc'
+    _GRANT_TYPE = 'password'
+    _INVALID_PASSWORD_MESSAGE = 'Invalid user credentials'
+    _REALM_ENDPOINT = '/auth/realms/ALMA'
+    _LOGIN_ENDPOINT = f'{_REALM_ENDPOINT}/protocol/openid-connect/token'
+    _VERIFY_WELL_KNOWN_ENDPOINT = f'{_REALM_ENDPOINT}/.well-known/openid-configuration'
+
+    def __init__(self):
+        super().__init__()
+        self._auth_hosts = auth_urls
+        self._auth_host = None
+
+    @property
+    def auth_hosts(self):
+        return self._auth_hosts
+
+    @auth_hosts.setter
+    def auth_hosts(self, auth_hosts):
+        """
+        Set the available hosts to check for login endpoints.
+
+        Parameters
+        ----------
+        auth_hosts : array
+            Available hosts name.  Checking each one until one returns a 200 for
+            the well-known endpoint.
+        """
+        if auth_hosts is None:
+            raise LoginError('Valid authentication hosts cannot be None')
+        else:
+            self._auth_hosts = auth_hosts
+
+    def get_valid_host(self):
+        if self._auth_host is None:
+            for auth_url in self._auth_hosts:
+                # set session cookies (they do not get set otherwise)
+                url_to_check = f'https://{auth_url}{self._VERIFY_WELL_KNOWN_ENDPOINT}'
+                response = self._request("HEAD", url_to_check, cache=False)
+
+                if response.status_code == 200:
+                    self._auth_host = auth_url
+                    log.debug(f'Set auth host to {self._auth_host}')
+                    break
+
+        if self._auth_host is None:
+            raise LoginError(f'No useable hosts to login to: {self._auth_hosts}')
+        else:
+            return self._auth_host
+
+    def login(self, username, password):
+        """
+        Authenticate to one of the configured hosts.
+
+        Parameters
+        ----------
+        username : str
+            The username to authenticate with
+        password : str
+            The user's password
+        """
+        data = {
+            'username': username,
+            'password': password,
+            'grant_type': self._GRANT_TYPE,
+            'client_id': self._CLIENT_ID
+        }
+
+        login_url = f'https://{self.get_valid_host()}{self._LOGIN_ENDPOINT}'
+        log.info(f'Authenticating {username} on {login_url}.')
+        login_response = self._request('POST', login_url, data=data, cache=False)
+        json_auth = login_response.json()
+
+        if 'error' in json_auth:
+            log.debug(f'{json_auth}')
+            error_message = json_auth['error_description']
+            if self._INVALID_PASSWORD_MESSAGE not in error_message:
+                raise LoginError("Could not log in to ALMA authorization portal: "
+                                 f"{self.get_valid_host()} Message from server: {error_message}")
+            else:
+                raise LoginError(error_message)
+        elif 'access_token' not in json_auth:
+            raise LoginError("Could not log in to any of the known ALMA authorization portals: \n"
+                             f"No error from server, but missing access token from host: {self.get_valid_host()}")
+        else:
+            log.info(f'Successfully logged in to {self._auth_host}')
 
 
 @async_to_sync
@@ -193,50 +412,73 @@ class AlmaClass(QueryWithLogin):
 
     def __init__(self):
         # sia service does not need disambiguation but tap does
-        super(AlmaClass, self).__init__()
+        super().__init__()
         self._sia = None
         self._tap = None
         self._datalink = None
-        self.sia_url = None
-        self.tap_url = None
-        self.datalink_url = None
+        self._sia_url = None
+        self._tap_url = None
+        self._datalink_url = None
+        self._auth = AlmaAuth()
+
+    @property
+    def auth(self):
+        return self._auth
 
     @property
     def datalink(self):
         if not self._datalink:
-            base_url = self._get_dataarchive_url()
-            if base_url.endswith('/'):
-                self.datalink_url = base_url + ALMA_DATALINK_PATH
-            else:
-                self.datalink_url = base_url + '/' + ALMA_DATALINK_PATH
-            self._datalink = pyvo.dal.adhoc.DatalinkService(
-                baseurl=self.datalink_url)
+            self._datalink = pyvo.dal.adhoc.DatalinkService(self.datalink_url)
         return self._datalink
+
+    @property
+    def datalink_url(self):
+        if not self._datalink_url:
+            try:
+                self._datalink_url = urljoin(self._get_dataarchive_url(), DATALINK_SERVICE_PATH)
+            except requests.exceptions.HTTPError as err:
+                log.debug(
+                    f"ERROR getting the ALMA Archive URL: {str(err)}")
+                raise err
+        return self._datalink_url
 
     @property
     def sia(self):
         if not self._sia:
-            base_url = self._get_dataarchive_url()
-            if base_url.endswith('/'):
-                self.sia_url = base_url + ALMA_SIA_PATH
-            else:
-                self.sia_url = base_url + '/' + ALMA_SIA_PATH
-            self._sia = pyvo.dal.sia2.SIAService(baseurl=self.sia_url)
+            self._sia = SIA2Service(baseurl=self.sia_url)
         return self._sia
+
+    @property
+    def sia_url(self):
+        if not self._sia_url:
+            try:
+                self._sia_url = urljoin(self._get_dataarchive_url(), SIA_SERVICE_PATH)
+            except requests.exceptions.HTTPError as err:
+                log.debug(
+                    f"ERROR getting the  ALMA Archive URL: {str(err)}")
+                raise err
+        return self._sia_url
 
     @property
     def tap(self):
         if not self._tap:
-            base_url = self._get_dataarchive_url()
-            if base_url.endswith('/'):
-                self.tap_url = base_url + ALMA_TAP_PATH
-            else:
-                self.tap_url = base_url + '/' + ALMA_TAP_PATH
-            self._tap = pyvo.dal.tap.TAPService(baseurl=self.tap_url)
+            self._tap = pyvo.dal.tap.TAPService(baseurl=self.tap_url, session=self._session)
         return self._tap
 
-    def query_object_async(self, object_name, cache=None, public=True,
-                           science=True, payload=None, **kwargs):
+    @property
+    def tap_url(self):
+        if not self._tap_url:
+            try:
+                self._tap_url = urljoin(self._get_dataarchive_url(), TAP_SERVICE_PATH)
+            except requests.exceptions.HTTPError as err:
+                log.debug(
+                    f"ERROR getting the  ALMA Archive URL: {str(err)}")
+                raise err
+        return self._tap_url
+
+    def query_object_async(self, object_name, *, public=True,
+                           science=True, payload=None, enhanced_results=False,
+                           **kwargs):
         """
         Query the archive for a source name.
 
@@ -244,13 +486,15 @@ class AlmaClass(QueryWithLogin):
         ----------
         object_name : str
             The object name.  Will be resolved by astropy.coord.SkyCoord
-        cache : deprecated
         public : bool
             True to return only public datasets, False to return private only,
             None to return both
         science : bool
             True to return only science datasets, False to return only
             calibration, None to return both
+        enhanced_results : bool
+            True to return a table with quantities instead of just values. It
+            also returns the footprint as `regions` objects.
         payload : dict
             Dictionary of additional keywords.  See `help`.
         """
@@ -259,10 +503,12 @@ class AlmaClass(QueryWithLogin):
         else:
             payload = {'source_name_resolver': object_name}
         return self.query_async(public=public, science=science,
-                                payload=payload, **kwargs)
+                                payload=payload, enhanced_results=enhanced_results,
+                                **kwargs)
 
-    def query_region_async(self, coordinate, radius, cache=None, public=True,
-                           science=True, payload=None, **kwargs):
+    def query_region_async(self, coordinate, radius, *, public=True,
+                           science=True, payload=None, enhanced_results=False,
+                           **kwargs):
         """
         Query the ALMA archive with a source name and radius
 
@@ -272,8 +518,6 @@ class AlmaClass(QueryWithLogin):
             the identifier or coordinates around which to query.
         radius : str / `~astropy.units.Quantity`, optional
             the radius of the region
-        cache : Deprecated
-            Cache the query?
         public : bool
             True to return only public datasets, False to return private only,
             None to return both
@@ -282,6 +526,9 @@ class AlmaClass(QueryWithLogin):
             calibration, None to return both
         payload : dict
             Dictionary of additional keywords.  See `help`.
+        enhanced_results : bool
+            True to return a table with quantities instead of just values. It
+            also returns the footprints as `regions` objects.
         """
         rad = radius
         if not isinstance(radius, u.Quantity):
@@ -296,12 +543,12 @@ class AlmaClass(QueryWithLogin):
             payload['ra_dec'] = ra_dec
 
         return self.query_async(public=public, science=science,
-                                payload=payload, **kwargs)
+                                payload=payload, enhanced_results=enhanced_results,
+                                **kwargs)
 
-    def query_async(self, payload, cache=None, public=True, science=True,
-                    legacy_columns=False, max_retries=None,
-                    get_html_version=None,
-                    get_query_payload=None, **kwargs):
+    def query_async(self, payload, *, public=True, science=True,
+                    legacy_columns=False, get_query_payload=False,
+                    maxrec=None, enhanced_results=False, **kwargs):
         """
         Perform a generic query with user-specified payload
 
@@ -309,7 +556,6 @@ class AlmaClass(QueryWithLogin):
         ----------
         payload : dictionary
             Please consult the `help` method
-        cache : deprecated
         public : bool
             True to return only public datasets, False to return private only,
             None to return both
@@ -319,6 +565,13 @@ class AlmaClass(QueryWithLogin):
         legacy_columns : bool
             True to return the columns from the obsolete ALMA advanced query,
             otherwise return the current columns based on ObsCore model.
+        get_query_payload : bool
+            Flag to indicate whether to simply return the payload.
+        maxrec : integer
+            Cap on the amount of records returned.  Default is no limit.
+        enhanced_results : bool
+            True to return a table with quantities instead of just values. It
+            also returns the footprints as `regions` objects.
 
         Returns
         -------
@@ -326,17 +579,6 @@ class AlmaClass(QueryWithLogin):
         Table with results. Columns are those in the ALMA ObsCore model
         (see ``help_tap``) unless ``legacy_columns`` argument is set to True.
         """
-        local_args = dict(locals().items())
-
-        for arg in local_args:
-            # check if the deprecated attributes have been used
-            for dep in ['cache', 'max_retries', 'get_html_version']:
-                if arg[0] == dep and arg[1] is not None:
-                    warnings.warn(
-                        ("Argument '{}' has been deprecated "
-                         "since version 4.0.1 and will be ignored".format(arg[0])),
-                        AstropyDeprecationWarning)
-                    del kwargs[arg[0]]
 
         if payload is None:
             payload = {}
@@ -353,13 +595,21 @@ class AlmaClass(QueryWithLogin):
             payload['science_observation'] = science
         if public is not None:
             payload['public_data'] = public
-        if get_query_payload:
-            return payload
 
         query = _gen_sql(payload)
-        result = self.query_tap(query, maxrec=payload.get('maxrec', None))
+
+        if get_query_payload:
+            # Return the TAP query payload that goes out to the server rather
+            # than the unprocessed payload dict from the python side
+            return query
+
+        result = self.query_tap(query, maxrec=maxrec)
+
         if result is not None:
-            result = result.to_table()
+            if enhanced_results:
+                result = get_enhanced_table(result)
+            else:
+                result = result.to_table()
         else:
             # Should not happen
             raise RuntimeError('BUG: Unexpected result None')
@@ -384,7 +634,7 @@ class AlmaClass(QueryWithLogin):
             return legacy_result
         return result
 
-    def query_sia(self, pos=None, band=None, time=None, pol=None,
+    def query_sia(self, *, pos=None, band=None, time=None, pol=None,
                   field_of_view=None, spatial_resolution=None,
                   spectral_resolving_power=None, exptime=None,
                   timeres=None, publisher_did=None,
@@ -402,7 +652,7 @@ class AlmaClass(QueryWithLogin):
 
         Returns
         -------
-        Results in `pyvo.dal.SIAResults` format.
+        Results in ``pyvo.dal.sia2.SIA2Results`` format.
         result.table in Astropy table format
         """
         return self.sia.search(
@@ -426,25 +676,35 @@ class AlmaClass(QueryWithLogin):
             maxrec=maxrec,
             **kwargs)
 
-    # SIA_PARAMETERS_DESC contains links that Sphinx can't resolve.
-    for var in ('POLARIZATION_STATES', 'CALIBRATION_LEVELS'):
-        SIA_PARAMETERS_DESC = SIA_PARAMETERS_DESC.replace(f'`pyvo.dam.obscore.{var}`',
-                                                          f'pyvo.dam.obscore.{var}')
-    query_sia.__doc__ = query_sia.__doc__.replace('_SIA2_PARAMETERS', SIA_PARAMETERS_DESC)
+    query_sia.__doc__ = query_sia.__doc__.replace('_SIA2_PARAMETERS', SIA2_PARAMETERS_DESC)
 
-    def query_tap(self, query, maxrec=None):
+    def query_tap(self, query, *, maxrec=None, uploads=None):
         """
         Send query to the ALMA TAP. Results in pyvo.dal.TapResult format.
         result.table in Astropy table format
 
         Parameters
         ----------
+        query : str
+            ADQL query to execute
         maxrec : int
             maximum number of records to return
+        uploads : dict
+            a mapping from temporary table names to objects containing a votable. These
+            temporary tables can be referred to in queries. The keys in the dictionary are
+            the names of temporary tables which need to be prefixed with the TAP_UPLOAD
+            schema in the actual query. The values are either astropy.table.Table instances
+            or file names or file like handles such as io.StringIO to table definition in
+            IVOA VOTable format.
+
+    Examples
+    --------
+    >>> uploads = {'tmptable': '/tmp/tmptable_def.xml'}
+    >>> rslt = query_tap(self, query, maxrec=None, uploads=uploads)
 
         """
         log.debug('TAP query: {}'.format(query))
-        return self.tap.search(query, language='ADQL', maxrec=maxrec)
+        return self.tap.search(query, language='ADQL', maxrec=maxrec, uploads=uploads)
 
     def help_tap(self):
         print('Table to query is "voa.ObsCore".')
@@ -466,11 +726,11 @@ class AlmaClass(QueryWithLogin):
 
     # update method pydocs
     query_region_async.__doc__ = query_region_async.__doc__.replace(
-        '_SIA2_PARAMETERS', pyvo.dal.sia2.SIA_PARAMETERS_DESC)
+        '_SIA2_PARAMETERS', SIA2_PARAMETERS_DESC)
     query_object_async.__doc__ = query_object_async.__doc__.replace(
-        '_SIA2_PARAMETERS', pyvo.dal.sia2.SIA_PARAMETERS_DESC)
+        '_SIA2_PARAMETERS', SIA2_PARAMETERS_DESC)
     query_async.__doc__ = query_async.__doc__.replace(
-        '_SIA2_PARAMETERS', pyvo.dal.sia2.SIA_PARAMETERS_DESC)
+        '_SIA2_PARAMETERS', SIA2_PARAMETERS_DESC)
 
     def _get_dataarchive_url(self):
         """
@@ -479,7 +739,7 @@ class AlmaClass(QueryWithLogin):
         """
         if not hasattr(self, 'dataarchive_url'):
             if self.archive_url in ('http://almascience.org', 'https://almascience.org'):
-                response = self._request('GET', self.archive_url,
+                response = self._request('GET', self.archive_url, timeout=self.TIMEOUT,
                                          cache=False)
                 response.raise_for_status()
                 # Jan 2017: we have to force https because the archive doesn't
@@ -499,56 +759,8 @@ class AlmaClass(QueryWithLogin):
                              "on github.")
         return self.dataarchive_url
 
-    @deprecated(since="v0.4.1", alternative="get_data_info")
-    def stage_data(self, uids, expand_tarfiles=False, return_json=False):
-        """
-        Obtain table of ALMA files
-
-        DEPRECATED: Data is no longer staged. This method is deprecated and
-        kept here for backwards compatibility reasons but it's not fully
-        compatible with the original implementation.
-
-        Parameters
-        ----------
-        uids : list or str
-            A list of valid UIDs or a single UID.
-            UIDs should have the form: 'uid://A002/X391d0b/X7b'
-        expand_tarfiles : DEPRECATED
-        return_json : DEPRECATED
-            Note: The returned astropy table can be easily converted to json
-            through pandas:
-            output = StringIO()
-            stage_data(...).to_pandas().to_json(output)
-            table_json = output.getvalue()
-
-        Returns
-        -------
-        data_file_table : Table
-            A table containing 3 columns: the UID, the file URL (for future
-            downloading), and the file size
-        """
-
-        if return_json:
-            raise AttributeError(
-                'return_json is deprecated. See method docs for a workaround')
-        table = Table()
-        res = self.get_data_info(uids, expand_tarfiles=expand_tarfiles)
-        p = re.compile(r'.*(uid__.*)\.asdm.*')
-        if res:
-            table['name'] = [u.split('/')[-1] for u in res['access_url']]
-            table['id'] = [p.search(x).group(1) if 'asdm' in x else 'None'
-                           for x in table['name']]
-            table['type'] = res['content_type']
-            table['size'] = res['content_length']
-            table['permission'] = ['UNKNOWN'] * len(res)
-            table['mous_uid'] = [uids] * len(res)
-            table['URL'] = res['access_url']
-            table['isProprietary'] = res['readable']
-        return table
-
-    def get_data_info(self, uids, expand_tarfiles=False,
+    def get_data_info(self, uids, *, expand_tarfiles=False,
                       with_auxiliary=True, with_rawdata=True):
-
         """
         Return information about the data associated with ALMA uid(s)
 
@@ -569,7 +781,7 @@ class AlmaClass(QueryWithLogin):
         Returns
         -------
         Table with results or None. Table has the following columns: id (UID),
-        access_url (URL to access data), content_length, content_type (MIME
+        access_url (URL to access data), service_def, content_length, content_type (MIME
         type), semantics, description (optional), error_message (optional)
         """
         if uids is None:
@@ -580,17 +792,21 @@ class AlmaClass(QueryWithLogin):
             raise TypeError("Datasets must be given as a list of strings.")
         # TODO remove this loop and send uids at once when pyvo fixed
         result = None
+        datalink_service_def_dict = {}
         for uid in uids:
             res = self.datalink.run_sync(uid)
             if res.status[0] != 'OK':
                 raise Exception('ERROR {}: {}'.format(res.status[0],
                                                       res.status[1]))
+
+            # Collect the ad-hoc DataLink services for later retrieval if expand_tarballs is set
+            if expand_tarfiles:
+                for adhoc_service in res.iter_adhocservices():
+                    if self.is_datalink_adhoc_service(adhoc_service):
+                        datalink_service_def_dict[adhoc_service.ID] = adhoc_service
+
             temp = res.to_table()
-            if ASTROPY_LT_4_1:
-                # very annoying
-                for col in [x for x in temp.colnames
-                            if x not in ['content_length', 'readable']]:
-                    temp[col] = temp[col].astype(str)
+
             result = temp if result is None else vstack([result, temp])
             to_delete = []
             for index, rr in enumerate(result):
@@ -607,24 +823,20 @@ class AlmaClass(QueryWithLogin):
         if not with_rawdata:
             result = result[np.core.defchararray.find(
                 result['semantics'], '#progenitor') == -1]
-        # primary data delivery type is files packaged in tarballs. However
-        # some type of data has an alternative way to retrieve each individual
-        # file as an alternative (semantics='#datalink' and
-        # 'content_type=application/x-votable+xml;content=datalink'). They also
-        # require an extra call to the datalink service to get the list of
-        # files.
-        DATALINK_FILE_TYPE = 'application/x-votable+xml;content=datalink'
-        DATALINK_SEMANTICS = '#datalink'
+        # if expand_tarfiles:
+        # identify the tarballs that can be expandable and replace them
+        # with the list of components
+        expanded_result = None
+        to_delete = []
         if expand_tarfiles:
-            # identify the tarballs that can be expandable and replace them
-            # with the list of components
-            expanded_result = None
-            to_delete = []
             for index, row in enumerate(result):
-                if DATALINK_SEMANTICS in row['semantics'] and \
-                        row['content_type'] == DATALINK_FILE_TYPE:
+                service_def_id = row['service_def']
+                # service_def record, so check if it points to a DataLink document
+                if service_def_id and service_def_id in datalink_service_def_dict:
                     # subsequent call to datalink
-                    file_id = row['access_url'].split('ID=')[1]
+                    adhoc_service = datalink_service_def_dict[service_def_id]
+                    recursive_access_url = self.get_adhoc_service_access_url(adhoc_service)
+                    file_id = recursive_access_url.split('ID=')[1]
                     expanded_tar = self.get_data_info(file_id)
                     expanded_tar = expanded_tar[
                         expanded_tar['semantics'] != '#cutout']
@@ -633,18 +845,29 @@ class AlmaClass(QueryWithLogin):
                     else:
                         expanded_result = vstack(
                             [expanded_result, expanded_tar], join_type='exact')
+
+                    # These DataLink entries have no access_url and are links to service_def RESOURCEs only,
+                    # so they can be removed if expanded.
                     to_delete.append(index)
-            # cleanup
-            result.remove_rows(to_delete)
-            # add the extra rows
-            if expanded_result:
-                result = vstack([result, expanded_result], join_type='exact')
-        else:
-            result = result[np.logical_or(np.core.defchararray.find(
-                result['semantics'].astype(str), DATALINK_SEMANTICS) == -1,
-                result['content_type'].astype(str) != DATALINK_FILE_TYPE)]
+        # cleanup
+        result.remove_rows(to_delete)
+        # add the extra rows
+        if expanded_result:
+            result = vstack([result, expanded_result], join_type='exact')
 
         return result
+
+    def is_datalink_adhoc_service(self, adhoc_service):
+        standard_id = self.get_adhoc_service_parameter(adhoc_service, 'standardID')
+        return standard_id == DATALINK_STANDARD_ID
+
+    def get_adhoc_service_access_url(self, adhoc_service):
+        return self.get_adhoc_service_parameter(adhoc_service, 'accessURL')
+
+    def get_adhoc_service_parameter(self, adhoc_service, parameter_id):
+        for p in adhoc_service.params:
+            if p.ID == parameter_id:
+                return p.value
 
     def is_proprietary(self, uid):
         """
@@ -652,7 +875,7 @@ class AlmaClass(QueryWithLogin):
         proprietary or not.
         """
         query = "select distinct data_rights from ivoa.obscore where " \
-                "obs_id='{}'".format(uid)
+                "member_ous_uid='{}'".format(uid)
         result = self.query_tap(query)
         if result:
             tableresult = result.to_table()
@@ -684,8 +907,9 @@ class AlmaClass(QueryWithLogin):
 
         return data_sizes, totalsize.to(u.GB)
 
-    def download_files(self, files, savedir=None, cache=True,
-                       continuation=True, skip_unauthorized=True,):
+    def download_files(self, files, *, savedir=None, cache=True,
+                       continuation=True, skip_unauthorized=True,
+                       verify_only=False):
         """
         Given a list of file URLs, download them
 
@@ -706,6 +930,10 @@ class AlmaClass(QueryWithLogin):
             If you receive "unauthorized" responses for some of the download
             requests, skip over them.  If this is False, an exception will be
             raised.
+        verify_only : bool
+            Option to go through the process of checking the files to see if
+            they're the right size, but not actually download them.  This
+            option may be useful if a previous download run failed partway.
         """
 
         if self.USERNAME:
@@ -719,7 +947,7 @@ class AlmaClass(QueryWithLogin):
         for file_link in unique(files):
             log.debug("Downloading {0} to {1}".format(file_link, savedir))
             try:
-                check_filename = self._request('HEAD', file_link, auth=auth)
+                check_filename = self._request('HEAD', file_link, auth=auth, timeout=self.TIMEOUT)
                 check_filename.raise_for_status()
             except requests.HTTPError as ex:
                 if ex.response.status_code == 401:
@@ -728,11 +956,11 @@ class AlmaClass(QueryWithLogin):
                                  " next file".format(url=file_link))
                         continue
                     else:
-                        raise(ex)
+                        raise (ex)
 
             try:
-                filename = re.search("filename=(.*)",
-                                     check_filename.headers['Content-Disposition']).groups()[0]
+                filename = os.path.basename(re.search("filename=(.*)",
+                                            check_filename.headers['Content-Disposition']).groups()[0])
             except KeyError:
                 log.info(f"Unable to find filename for {file_link}  "
                          "(missing Content-Disposition in header).  "
@@ -743,15 +971,34 @@ class AlmaClass(QueryWithLogin):
                 filename = os.path.join(savedir,
                                         filename)
 
+            if verify_only:
+                existing_file_length = os.stat(filename).st_size
+                if 'content-length' in check_filename.headers:
+                    length = int(check_filename.headers['content-length'])
+                    if length == 0:
+                        warnings.warn('URL {0} has length=0'.format(file_link))
+                    elif existing_file_length == length:
+                        log.info(f"Found cached file {filename} with expected size {existing_file_length}.")
+                    elif existing_file_length < length:
+                        log.info(f"Found cached file {filename} with size {existing_file_length} < expected "
+                                 f"size {length}.  The download should be continued.")
+                    elif existing_file_length > length:
+                        warnings.warn(f"Found cached file {filename} with size {existing_file_length} > expected "
+                                      f"size {length}.  The download is likely corrupted.",
+                                      CorruptDataWarning)
+                else:
+                    warnings.warn(f"Could not verify {file_link} because it has no 'content-length'")
+
             try:
-                self._download_file(file_link,
-                                    filename,
-                                    timeout=self.TIMEOUT,
-                                    auth=auth,
-                                    cache=cache,
-                                    method='GET',
-                                    head_safe=False,
-                                    continuation=continuation)
+                if not verify_only:
+                    self._download_file(file_link,
+                                        filename,
+                                        timeout=self.TIMEOUT,
+                                        auth=auth,
+                                        cache=cache,
+                                        method='GET',
+                                        head_safe=False,
+                                        continuation=continuation)
 
                 downloaded_files.append(filename)
             except requests.HTTPError as ex:
@@ -761,7 +1008,7 @@ class AlmaClass(QueryWithLogin):
                                  " next file".format(url=file_link))
                         continue
                     else:
-                        raise(ex)
+                        raise (ex)
                 elif ex.response.status_code == 403:
                     log.error("Access denied to {url}".format(url=file_link))
                     if 'dataPortal' in file_link and 'sso' not in file_link:
@@ -796,7 +1043,7 @@ class AlmaClass(QueryWithLogin):
 
         return response
 
-    def retrieve_data_from_uid(self, uids, cache=True):
+    def retrieve_data_from_uid(self, uids, *, cache=True):
         """
         Stage & Download ALMA data.  Will print out the expected file size
         before attempting the download.
@@ -820,7 +1067,15 @@ class AlmaClass(QueryWithLogin):
             raise TypeError("Datasets must be given as a list of strings.")
 
         files = self.get_data_info(uids)
-        file_urls = files['access_url']
+        # filter out blank access URLs
+        # it is possible for there to be length-1 lists
+        if len(files) == 1:
+            file_urls = files['access_url']
+            if isinstance(file_urls, str) and file_urls == '':
+                raise ValueError(f"Cannot download uid {uids} because it has no file")
+        else:
+            file_urls = [url for url in files['access_url'] if url]
+
         totalsize = files['content_length'].sum()*u.B
 
         # each_size, totalsize = self.data_size(files)
@@ -829,7 +1084,7 @@ class AlmaClass(QueryWithLogin):
         downloaded_files = self.download_files(file_urls)
         return downloaded_files
 
-    def _get_auth_info(self, username, store_password=False,
+    def _get_auth_info(self, username, *, store_password=False,
                        reenter_password=False):
         """
         Get the auth info (user, password) for use in another function
@@ -842,11 +1097,7 @@ class AlmaClass(QueryWithLogin):
             else:
                 username = self.USERNAME
 
-        if hasattr(self, '_auth_url'):
-            auth_url = self._auth_url
-        else:
-            raise LoginError("Login with .login() to acquire the appropriate"
-                             " login URL")
+        auth_url = self.auth.get_valid_host()
 
         # Get password from keyring or prompt
         password, password_from_keyring = self._get_password(
@@ -876,76 +1127,23 @@ class AlmaClass(QueryWithLogin):
             on the keyring. Default is False.
         """
 
-        success = False
-        for auth_url in auth_urls:
-            # set session cookies (they do not get set otherwise)
-            cookiesetpage = self._request("GET",
-                                          urljoin(self._get_dataarchive_url(),
-                                                  'rh/forceAuthentication'),
-                                          cache=False)
-            self._login_cookiepage = cookiesetpage
-            cookiesetpage.raise_for_status()
-
-            if (auth_url+'/cas/login' in cookiesetpage.request.url):
-                # we've hit a target, we're good
-                success = True
-                break
-        if not success:
-            raise LoginError("Could not log in to any of the known ALMA "
-                             "authorization portals: {0}".format(auth_urls))
-
-        # Check if already logged in
-        loginpage = self._request("GET", "https://{auth_url}/cas/login".format(auth_url=auth_url),
-                                  cache=False)
-        root = BeautifulSoup(loginpage.content, 'html5lib')
-        if root.find('div', class_='success'):
-            log.info("Already logged in.")
-            return True
-
-        self._auth_url = auth_url
+        self.auth.auth_hosts = auth_urls
 
         username, password = self._get_auth_info(username=username,
                                                  store_password=store_password,
                                                  reenter_password=reenter_password)
 
-        # Authenticate
-        log.info("Authenticating {0} on {1} ...".format(username, auth_url))
-        # Do not cache pieces of the login process
-        data = {kw: root.find('input', {'name': kw})['value']
-                for kw in ('execution', '_eventId')}
-        data['username'] = username
-        data['password'] = password
-        data['submit'] = 'LOGIN'
+        self.auth.login(username, password)
+        self.USERNAME = username
 
-        login_response = self._request("POST", "https://{0}/cas/login".format(auth_url),
-                                       params={'service': self._get_dataarchive_url()},
-                                       data=data,
-                                       cache=False)
-
-        # save the login response for debugging purposes
-        self._login_response = login_response
-        # do not expose password back to user
-        del data['password']
-        # but save the parameters for debug purposes
-        self._login_parameters = data
-
-        authenticated = ('You have successfully logged in' in
-                         login_response.text)
-
-        if authenticated:
-            log.info("Authentication successful!")
-            self.USERNAME = username
-        else:
-            log.exception("Authentication failed!")
-
-        return authenticated
+        return True
 
     def get_cycle0_uid_contents(self, uid):
         """
         List the file contents of a UID from Cycle 0.  Will raise an error
         if the UID is from cycle 1+, since those data have been released in
         a different and more consistent format.  See
-        http://almascience.org/documents-and-tools/cycle-2/ALMAQA2Productsv1.01.pdf
+        https://almascience.org/documents-and-tools/cycle-2/ALMAQA2Productsv1.01.pdf
         for details.
         """
 
@@ -972,15 +1170,15 @@ class AlmaClass(QueryWithLogin):
         if not hasattr(self, '_cycle0_tarfile_content_table'):
             url = urljoin(self._get_dataarchive_url(),
                           'alma-data/archive/cycle-0-tarfile-content')
-            response = self._request('GET', url, cache=True)
+            response = self._request('GET', url, cache=True, timeout=self.TIMEOUT)
 
             # html.parser is needed because some <tr>'s have form:
             # <tr width="blah"> which the default parser does not pick up
             root = BeautifulSoup(response.content, 'html.parser')
             html_table = root.find('table', class_='grid listing')
-            data = list(zip(*[(x.findAll('td')[0].text,
-                               x.findAll('td')[1].text)
-                              for x in html_table.findAll('tr')]))
+            data = list(zip(*[(x.find_all('td')[0].text,
+                               x.find_all('td')[1].text)
+                              for x in html_table.find_all('tr')]))
             columns = [Column(data=data[0], name='ID'),
                        Column(data=data[1], name='Files')]
             tbl = Table(columns)
@@ -999,15 +1197,14 @@ class AlmaClass(QueryWithLogin):
         Stoehr.
         """
         if not hasattr(self, '_cycle0_table'):
-            filename = resource_filename(
-                'astroquery.alma', 'data/cycle0_delivery_asdm_mapping.txt')
-
-            self._cycle0_table = Table.read(filename, format='ascii.no_header')
+            ref = importlib_resources.files('astroquery.alma') / 'data' / 'cycle0_delivery_asdm_mapping.txt'
+            with importlib_resources.as_file(ref) as path:
+                self._cycle0_table = Table.read(path, format='ascii.no_header')
             self._cycle0_table.rename_column('col1', 'ID')
             self._cycle0_table.rename_column('col2', 'uid')
         return self._cycle0_table
 
-    def get_files_from_tarballs(self, downloaded_files, regex=r'.*\.fits$',
+    def get_files_from_tarballs(self, downloaded_files, *, regex=r'.*\.fits$',
                                 path='cache_path', verbose=True):
         """
         Given a list of successfully downloaded tarballs, extract files
@@ -1057,7 +1254,7 @@ class AlmaClass(QueryWithLogin):
 
         return filelist
 
-    def download_and_extract_files(self, urls, delete=True, regex=r'.*\.fits$',
+    def download_and_extract_files(self, urls, *, delete=True, regex=r'.*\.fits$',
                                    include_asdm=False, path='cache_path',
                                    verbose=True):
         """
@@ -1171,53 +1368,7 @@ class AlmaClass(QueryWithLogin):
         print("Alma.query(payload=dict(project_code='2017.1.01355.L', "
               "source_name_alma='G008.67'))")
 
-    def _json_summary_to_table(self, data, base_url):
-        """
-        Special tool to convert some JSON metadata to a table Obsolete as of
-        March 2020 - should be removed along with stage_data_prefeb2020
-        """
-        from ..utils import url_helpers
-        columns = {'mous_uid': [], 'URL': [], 'size': []}
-        for entry in data['node_data']:
-            # de_type can be useful (e.g., MOUS), but it is not necessarily
-            # specified
-            # file_name and file_key *must* be specified.
-            is_file = \
-                (entry['file_name'] != 'null' and entry['file_key'] != 'null')
-            if is_file:
-                # "de_name": "ALMA+uid://A001/X122/X35e",
-                columns['mous_uid'].append(entry['de_name'][5:])
-                if entry['file_size'] == 'null':
-                    columns['size'].append(np.nan * u.Gbyte)
-                else:
-                    columns['size'].append(
-                        (int(entry['file_size']) * u.B).to(u.Gbyte))
-                # example template for constructing url:
-                # https://almascience.eso.org/dataPortal/requests/keflavich/940238268/ALMA/
-                # uid___A002_X9d6f4c_X154/2013.1.00546.S_uid___A002_X9d6f4c_X154.asdm.sdm.tar
-                # above is WRONG... except for ASDMs, when it's right
-                # should be:
-                # 2013.1.00546.S_uid___A002_X9d6f4c_X154.asdm.sdm.tar/2013.1.00546.S_uid___A002_X9d6f4c_X154.asdm.sdm.tar
-                #
-                # apparently ASDMs are different from others:
-                # templates:
-                # https://almascience.eso.org/dataPortal/requests/keflavich/946895898/ALMA/
-                # 2013.1.00308.S_uid___A001_X196_X93_001_of_001.tar/2013.1.00308.S_uid___A001_X196_X93_001_of_001.tar
-                # uid___A002_X9ee74a_X26f0/2013.1.00308.S_uid___A002_X9ee74a_X26f0.asdm.sdm.tar
-                url = url_helpers.join(base_url,
-                                       entry['file_key'],
-                                       entry['file_name'])
-                if 'null' in url:
-                    raise ValueError("The URL {0} was created containing "
-                                     "'null', which is invalid.".format(url))
-                columns['URL'].append(url)
-
-        columns['size'] = u.Quantity(columns['size'], u.Gbyte)
-
-        tbl = Table([Column(name=k, data=v) for k, v in columns.items()])
-        return tbl
-
-    def get_project_metadata(self, projectid, cache=True):
+    def get_project_metadata(self, projectid, *, cache=True):
         """
         Get the metadata - specifically, the project abstract - for a given project ID.
         """
@@ -1228,10 +1379,8 @@ class AlmaClass(QueryWithLogin):
         result = self.query_tap(
             "select distinct proposal_abstract from "
             "ivoa.obscore where proposal_id='{}'".format(projectid))
-        if ASTROPY_LT_4_1:
-            return [result[0]['proposal_abstract'].astype(str)]
-        else:
-            return [result[0]['proposal_abstract']]
+
+        return [result[0]['proposal_abstract']]
 
 
 Alma = AlmaClass()

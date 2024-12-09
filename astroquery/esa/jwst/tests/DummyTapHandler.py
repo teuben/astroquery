@@ -48,9 +48,7 @@ class DummyTapHandler:
         if method == self.__invokedMethod:
             return
         else:
-            raise ValueError(f"Method '+{str(method)}" +
-                             f"' not invoked. (Invoked method is '" +
-                             f"{str(self.__invokedMethod)}"+"')")
+            raise ValueError(f"Method '+{str(method)}' not invoked. (Invoked method is '{str(self.__invokedMethod)}')")
 
     def check_parameters(self, parameters, method_name):
         print("FOUND")
@@ -75,7 +73,6 @@ class DummyTapHandler:
             else:
                 raise ValueError(f"Parameter '{str(key)}' not found "
                                  f"for method '{method_name}'")
-        return False
 
     def load_tables(self, only_names=False, include_shared_tables=False,
                     verbose=False):

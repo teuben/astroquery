@@ -5,7 +5,10 @@ import os
 import pytest
 from astropy.coordinates import SkyCoord
 from astropy import units as u
+from astropy.utils.exceptions import AstropyDeprecationWarning
+
 from astroquery.utils.mocks import MockResponse
+
 
 DATA_FILES = {'gal_0_3': 'gal_0_3.txt'}
 
@@ -25,7 +28,8 @@ def patch_post(request):
 
 def post_mockreturn(method, url, data, timeout, files=None, **kwargs):
     if files is not None:
-        content = open(data_path(DATA_FILES['gal_0_3']), 'rb').read()
+        with open(data_path(DATA_FILES['gal_0_3']), 'rb') as infile:
+            content = infile.read()
         response = MockResponse(content, **kwargs)
     else:
         raise ValueError("Unsupported post request.")
@@ -55,4 +59,5 @@ def test_ogle_list_values(patch_post):
     coordinates
     """
     co_list = [[0, 0, 0], [3, 3, 3]]
-    ogle.core.Ogle.query_region(coord=co_list)
+    with pytest.warns(AstropyDeprecationWarning):
+        ogle.core.Ogle.query_region(coord=co_list)

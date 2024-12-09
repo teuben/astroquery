@@ -2,7 +2,6 @@
 
 from collections import OrderedDict
 import os
-import requests
 import pytest
 import tempfile
 import textwrap
@@ -14,7 +13,7 @@ import astropy.io.votable as votable
 import astropy.units as u
 from astropy.table import Table
 import astropy.utils.data as aud
-from astropy.utils.exceptions import AstropyDeprecationWarning
+from astropy.logger import log
 
 from ...utils import chunk_read, chunk_report, class_or_instance, commons
 from ...utils.process_asyncs import async_to_sync_docstr, async_to_sync
@@ -27,10 +26,10 @@ class SimpleQueryClass:
     def query(self):
         """ docstring """
         if self is SimpleQueryClass:
-            print("Calling query as class method")
+            log.info("Calling query as class method")
             return "class"
         else:
-            print("Calling query as instance method")
+            log.info("Calling query as instance method")
             return "instance"
 
 
@@ -46,7 +45,9 @@ def test_class_or_instance():
     assert SimpleQueryClass.query() == "class"
     U = SimpleQueryClass()
     assert U.query() == "instance"
-    assert SimpleQueryClass.query.__doc__ == " docstring "
+    # Indent changes in Python 3.13 thus cannot equate
+    # See https://github.com/python/cpython/issues/81283
+    assert "docstring" in SimpleQueryClass.query.__doc__
 
 
 @pytest.mark.parametrize(('coordinates'),
@@ -77,68 +78,6 @@ def test_parse_coordinates_4():
     coordinates = "251.51 32.36"
     c = commons.parse_coordinates(coordinates)
     assert c.to_string() == coordinates
-
-
-def test_send_request_post(monkeypatch):
-    def mock_post(url, data, timeout, headers={}, status_code=200):
-        class SpecialMockResponse:
-
-            def __init__(self, url, data, headers, status_code):
-                self.url = url
-                self.data = data
-                self.headers = headers
-                self.status_code = status_code
-
-            def raise_for_status(self):
-                pass
-
-        return SpecialMockResponse(url, data, headers=headers,
-                                   status_code=status_code)
-    monkeypatch.setattr(requests, 'post', mock_post)
-
-    with pytest.warns(AstropyDeprecationWarning):
-        response = commons.send_request('https://github.com/astropy/astroquery',
-                                            data=dict(msg='ok'), timeout=30)
-    assert response.url == 'https://github.com/astropy/astroquery'
-    assert response.data == dict(msg='ok')
-    assert 'astroquery' in response.headers['User-Agent']
-    assert response.headers['User-Agent'].endswith("_testrun")
-
-
-def test_send_request_get(monkeypatch):
-    def mock_get(url, params, timeout, headers={}, status_code=200):
-        req = requests.Request(
-            'GET', url, params=params, headers=headers).prepare()
-        req.status_code = status_code
-        req.raise_for_status = lambda: None
-        return req
-    monkeypatch.setattr(requests, 'get', mock_get)
-    with pytest.warns(AstropyDeprecationWarning):
-        response = commons.send_request('https://github.com/astropy/astroquery',
-                                        dict(a='b'), 60, request_type='GET')
-    assert response.url == 'https://github.com/astropy/astroquery?a=b'
-
-
-def test_quantity_timeout(monkeypatch):
-    def mock_get(url, params, timeout, headers={}, status_code=200):
-        req = requests.Request(
-            'GET', url, params=params, headers=headers).prepare()
-        req.status_code = status_code
-        req.raise_for_status = lambda: None
-        return req
-    monkeypatch.setattr(requests, 'get', mock_get)
-    with pytest.warns(AstropyDeprecationWarning):
-        response = commons.send_request('https://github.com/astropy/astroquery',
-                                        dict(a='b'), 1 * u.min,
-                                        request_type='GET')
-    assert response.url == 'https://github.com/astropy/astroquery?a=b'
-
-
-def test_send_request_err():
-    with pytest.raises(ValueError):
-        with pytest.warns(AstropyDeprecationWarning):
-            commons.send_request('https://github.com/astropy/astroquery',
-                                 dict(a='b'), 60, request_type='PUT')
 
 
 col_1 = [1, 2, 3]
@@ -225,7 +164,7 @@ docstr2 = """
         ----------
         keywords : list or string
             List of keywords, or space-separated set of keywords.
-            From `Vizier <http://vizier.u-strasbg.fr/doc/asu-summary.htx>`_:
+            From `Vizier <https://vizier.unistra.fr/doc/asu-summary.htx>`_:
             "names or words of title of catalog. The words are and'ed, i.e.
             only the catalogues characterized by all the words are selected."
 
@@ -258,7 +197,7 @@ docstr2_out = textwrap.dedent("""
         ----------
         keywords : list or string
             List of keywords, or space-separated set of keywords.
-            From `Vizier <http://vizier.u-strasbg.fr/doc/asu-summary.htx>`_:
+            From `Vizier <https://vizier.unistra.fr/doc/asu-summary.htx>`_:
             "names or words of title of catalog. The words are and'ed, i.e.
             only the catalogues characterized by all the words are selected."
 
@@ -318,8 +257,8 @@ docstr3_out = """
 
 
 def test_return_chomper(doc=docstr3, out=docstr3_out):
-    assert (remove_sections(doc, sections=['Returns', 'Parameters']) ==
-            [x.lstrip() for x in out.split('\n')])
+    assert (remove_sections(doc, sections=['Returns', 'Parameters'])
+            == [x.lstrip() for x in out.split('\n')])
 
 
 def dummyfunc1():
@@ -416,9 +355,8 @@ def patch_getreadablefileobj(request):
     _is_url = aud._is_url
     aud._is_url = lambda x: True
 
-    if not commons.ASTROPY_LT_4_3:
-        _try_url_open = aud._try_url_open
-        aud._try_url_open = lambda x, **kwargs: MockRemote(x, **kwargs)
+    _try_url_open = aud._try_url_open
+    aud._try_url_open = lambda x, **kwargs: MockRemote(x, **kwargs)
 
     _urlopen = urllib.request.urlopen
     _urlopener = urllib.request.build_opener
@@ -445,7 +383,7 @@ def patch_getreadablefileobj(request):
             self.file.close()
 
     def monkey_urlopen(x, *args, **kwargs):
-        print("Monkeyed URLopen")
+        log.info("Monkeyed URLopen")
         return MockRemote(fitsfilepath, *args, **kwargs)
 
     def monkey_builder(tlscontext=None):
@@ -456,7 +394,7 @@ def patch_getreadablefileobj(request):
     def monkey_urlrequest(x, *args, **kwargs):
         # urlrequest allows passing headers; this will just return the URL
         # because we're ignoring headers during mocked actions
-        print("Monkeyed URLrequest")
+        log.info("Monkeyed URLrequest")
         return x
 
     aud.urllib.request.Request = monkey_urlrequest
@@ -468,8 +406,7 @@ def patch_getreadablefileobj(request):
     def closing():
         aud._is_url = _is_url
 
-        if not commons.ASTROPY_LT_4_3:
-            aud._try_url_open = _try_url_open
+        aud._try_url_open = _try_url_open
 
         urllib.request.urlopen = _urlopen
         aud.urllib.request.urlopen = _urlopen
@@ -501,11 +438,3 @@ def test_filecontainer_get(patch_getreadablefileobj):
 def test_is_coordinate(coordinates, expected):
     out = commons._is_coordinate(coordinates)
     assert out == expected
-
-
-@pytest.mark.parametrize(('radius'),
-                         [0.01*u.deg, '0.01 deg', 0.01*u.arcmin]
-                         )
-def test_radius_to_unit(radius):
-    c = commons.radius_to_unit(radius)
-    assert c is not None

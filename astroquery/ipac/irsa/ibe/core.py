@@ -8,7 +8,6 @@ API from
  https://irsa.ipac.caltech.edu/ibe/
 """
 
-
 import os
 import webbrowser
 from bs4 import BeautifulSoup
@@ -31,9 +30,9 @@ class IbeClass(BaseQuery):
     TABLE = conf.table
     TIMEOUT = conf.timeout
 
-    def query_region(self, coordinate=None, where=None, mission=None, dataset=None,
-                     table=None, columns=None, width=None, height=None,
-                     intersect='OVERLAPS', most_centered=False):
+    def query_region(self, *, coordinate=None, where=None, mission=None,
+                     dataset=None, table=None, columns=None, width=None,
+                     height=None, intersect='OVERLAPS', most_centered=False):
         """
         For certain missions, this function can be used to search for image and
         catalog files based on a point, a box (bounded by great circles) and/or
@@ -107,7 +106,7 @@ class IbeClass(BaseQuery):
 
         return Table.read(response.text, format='ipac', guess=False)
 
-    def query_region_sia(self, coordinate=None, mission=None,
+    def query_region_sia(self, *, coordinate=None, mission=None,
                          dataset=None, table=None, width=None,
                          height=None, intersect='OVERLAPS',
                          most_centered=False):
@@ -127,7 +126,7 @@ class IbeClass(BaseQuery):
         return commons.parse_votable(
             response.text).get_first_table().to_table()
 
-    def query_region_async(self, coordinate=None, where=None, mission=None, dataset=None,
+    def query_region_async(self, *, coordinate=None, where=None, mission=None, dataset=None,
                            table=None, columns=None, width=None, height=None,
                            action='search', intersect='OVERLAPS', most_centered=False):
         """
@@ -206,15 +205,15 @@ class IbeClass(BaseQuery):
         intersect = intersect.upper()
         if intersect not in ('COVERS', 'ENCLOSED', 'CENTER', 'OVERLAPS'):
             raise InvalidQueryError(
-                "Invalid value for `intersects` " +
-                "(must be 'COVERS', 'ENCLOSED', 'CENTER', or 'OVERLAPS')")
+                "Invalid value for `intersects` "
+                + "(must be 'COVERS', 'ENCLOSED', 'CENTER', or 'OVERLAPS')")
 
         if action not in ('sia', 'data', 'search'):
             raise InvalidQueryError("Valid actions are: sia, data, search.")
         if action == 'data':
             raise NotImplementedError(
-                "The action='data' option is a placeholder for future " +
-                "functionality.")
+                "The action='data' option is a placeholder for future "
+                + "functionality.")
 
         args = {
             'INTERSECT': intersect
@@ -244,22 +243,23 @@ class IbeClass(BaseQuery):
             args['columns'] = ','.join(columns)
 
         url = "{URL}{action}/{mission}/{dataset}/{table}".format(
-                URL=self.URL,
-                action=action,
-                mission=mission or self.MISSION,
-                dataset=dataset or self.DATASET,
-                table=table or self.TABLE)
+            URL=self.URL,
+            action=action,
+            mission=mission or self.MISSION,
+            dataset=dataset or self.DATASET,
+            table=table or self.TABLE)
 
         return self._request('GET', url, args, timeout=self.TIMEOUT)
 
-    def list_missions(self, cache=True):
+    def list_missions(self, *, cache=True):
         """
         Return a list of the available missions
 
         Parameters
         ----------
         cache : bool
-            Cache the query result
+            Defaults to True. If set overrides global caching behavior.
+            See :ref:`caching documentation <astroquery_cache>`.
         """
         if hasattr(self, '_missions') and cache:
             # extra level caching to avoid redoing the BeautifulSoup parsing
@@ -270,16 +270,15 @@ class IbeClass(BaseQuery):
             response = self._request('GET', url, timeout=self.TIMEOUT,
                                      cache=cache)
 
-            root = BeautifulSoup(response.text)
-            links = root.findAll('a')
+            root = BeautifulSoup(response.text, 'html5lib')
+            links = root.find_all('a')
 
-            missions = [os.path.basename(a.attrs['href'].rstrip('/'))
-                            for a in links]
+            missions = [os.path.basename(a.attrs['href'].rstrip('/')) for a in links]
             self._missions = missions
 
         return missions
 
-    def list_datasets(self, mission=None, cache=True):
+    def list_datasets(self, *, mission=None, cache=True):
         """
         For a given mission, list the available datasets
 
@@ -290,7 +289,8 @@ class IbeClass(BaseQuery):
             `~astroquery.ipac.irsa.ibe.IbeClass.list_missions`.  Defaults to the
             configured Mission
         cache : bool
-            Cache the query result
+            Defaults to True. If set overrides global caching behavior.
+            See :ref:`caching documentation <astroquery_cache>`.
 
         Returns
         -------
@@ -308,15 +308,15 @@ class IbeClass(BaseQuery):
         response = self._request('GET', url, timeout=self.TIMEOUT,
                                  cache=cache)
 
-        root = BeautifulSoup(response.text)
-        links = root.findAll('a')
+        root = BeautifulSoup(response.text, 'html5lib')
+        links = root.find_all('a')
         datasets = [a.text for a in links
                     if a.attrs['href'].count('/') >= 4  # shown as '..'; ignore
                     ]
 
         return datasets
 
-    def list_tables(self, mission=None, dataset=None, cache=True):
+    def list_tables(self, *, mission=None, dataset=None, cache=True):
         """
         For a given mission and dataset (see
         `~astroquery.ipac.irsa.ibe.IbeClass.list_missions`,
@@ -333,7 +333,8 @@ class IbeClass(BaseQuery):
             A dataset name.  Must be one of the valid dataset from
             ``list_datsets(mission)``.  Defaults to the configured Dataset
         cache : bool
-            Cache the query result
+            Defaults to True. If set overrides global caching behavior.
+            See :ref:`caching documentation <astroquery_cache>`.
 
         Returns
         -------
@@ -350,11 +351,11 @@ class IbeClass(BaseQuery):
                              "Must be one of: {1}"
                              .format(mission, self.list_missions()))
 
-        if dataset not in self.list_datasets(mission, cache=cache):
+        if dataset not in self.list_datasets(mission=mission, cache=cache):
             raise ValueError("Invalid dataset {0} specified for mission {1}."
                              "Must be one of: {2}"
                              .format(dataset, mission,
-                                     self.list_datasets(mission, cache=True)))
+                                     self.list_datasets(mission=mission, cache=True)))
 
         url = "{URL}search/{mission}/{dataset}/".format(URL=self.URL,
                                                         mission=mission,
@@ -362,15 +363,15 @@ class IbeClass(BaseQuery):
         response = self._request('GET', url, timeout=self.TIMEOUT,
                                  cache=cache)
 
-        root = BeautifulSoup(response.text)
-        return [tr.find('td').string for tr in root.findAll('tr')[1:]]
+        root = BeautifulSoup(response.text, 'html5lib')
+        return [tr.find('td').string for tr in root.find_all('tr')[1:]]
 
     # Unfortunately, the URL construction for each data set is different, and
     # they're not obviously accessible via API
     # def get_data(self, **kwargs):
     #    return self.query_region_async(retrieve_data=True, **kwargs)
 
-    def show_docs(self, mission=None, dataset=None, table=None):
+    def show_docs(self, *, mission=None, dataset=None, table=None):
         """
         Open the documentation for a given table in a web browser.
 
@@ -385,14 +386,14 @@ class IbeClass(BaseQuery):
         """
 
         url = "{URL}docs/{mission}/{dataset}/{table}".format(
-                URL=self.URL,
-                mission=mission or self.MISSION,
-                dataset=dataset or self.DATASET,
-                table=table or self.TABLE)
+            URL=self.URL,
+            mission=mission or self.MISSION,
+            dataset=dataset or self.DATASET,
+            table=table or self.TABLE)
 
         return webbrowser.open(url)
 
-    def get_columns(self, mission=None, dataset=None, table=None):
+    def get_columns(self, *, mission=None, dataset=None, table=None):
         """
         Get the schema for a given table.
 
@@ -412,10 +413,10 @@ class IbeClass(BaseQuery):
         """
 
         url = "{URL}search/{mission}/{dataset}/{table}".format(
-                URL=self.URL,
-                mission=mission or self.MISSION,
-                dataset=dataset or self.DATASET,
-                table=table or self.TABLE)
+            URL=self.URL,
+            mission=mission or self.MISSION,
+            dataset=dataset or self.DATASET,
+            table=table or self.TABLE)
 
         response = self._request(
             'GET', url, {'FORMAT': 'METADATA'}, timeout=self.TIMEOUT)

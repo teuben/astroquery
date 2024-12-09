@@ -1,33 +1,44 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
 import abc
 import inspect
 import pickle
+import copy
 import getpass
 import hashlib
 import keyring
 import io
 import os
+import platform
 import requests
 import textwrap
 
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
+
 from astropy.config import paths
-from astroquery import log
 import astropy.units as u
 from astropy.utils.console import ProgressBarOrSpinner
 import astropy.utils.data
+from astropy.utils import deprecated
 
-from . import version
-from .utils import system_tools
+import pyvo
 
-__all__ = ['BaseQuery', 'QueryWithLogin']
+from astroquery import version, log, cache_conf
+from astroquery.utils import system_tools
+
+
+__all__ = ['BaseVOQuery', 'BaseQuery', 'QueryWithLogin']
 
 
 def to_cache(response, cache_file):
     log.debug("Caching data to {0}".format(cache_file))
+
+    response = copy.deepcopy(response)
+    if hasattr(response, 'request'):
+        for key in tuple(response.request.hooks.keys()):
+            del response.request.hooks[key]
     with open(cache_file, "wb") as f:
-        pickle.dump(response, f)
+        pickle.dump(response, f, protocol=4)
 
 
 def _replace_none_iterable(iterable):
@@ -99,20 +110,30 @@ class AstroQuery:
         return self._hash
 
     def request_file(self, cache_location):
-        fn = os.path.join(cache_location, self.hash() + ".pickle")
+        fn = cache_location.joinpath(self.hash() + ".pickle")
         return fn
 
-    def from_cache(self, cache_location):
+    def from_cache(self, cache_location, cache_timeout):
         request_file = self.request_file(cache_location)
         try:
-            with open(request_file, "rb") as f:
-                response = pickle.load(f)
-            if not isinstance(response, requests.Response):
+            if cache_timeout is None:
+                expired = False
+            else:
+                current_time = datetime.now(timezone.utc)
+                cache_time = datetime.fromtimestamp(request_file.stat().st_mtime, timezone.utc)
+                expired = current_time-cache_time > timedelta(seconds=cache_timeout)
+            if not expired:
+                with open(request_file, "rb") as f:
+                    response = pickle.load(f)
+                if not isinstance(response, requests.Response):
+                    response = None
+            else:
+                log.debug(f"Cache expired for {request_file}...")
                 response = None
-        except IOError:  # TODO: change to FileNotFoundError once drop py2 support
+        except FileNotFoundError:
             response = None
         if response:
-            log.debug("Retrieving data from {0}".format(request_file))
+            log.debug("Retrieved data from {0}".format(request_file))
         return response
 
     def remove_cache_file(self, cache_location):
@@ -122,11 +143,11 @@ class AstroQuery:
         """
         request_file = self.request_file(cache_location)
 
-        if os.path.exists(request_file):
-            os.remove(request_file)
+        if request_file.exists:
+            request_file.unlink()
         else:
-            raise OSError(f"Tried to remove cache file {request_file} but "
-                          "it does not exist")
+            raise FileNotFoundError(f"Tried to remove cache file {request_file} but "
+                                    "it does not exist")
 
 
 class LoginABCMeta(abc.ABCMeta):
@@ -141,7 +162,7 @@ class LoginABCMeta(abc.ABCMeta):
     """
 
     def __new__(cls, name, bases, attrs):
-        newcls = super(LoginABCMeta, cls).__new__(cls, name, bases, attrs)
+        newcls = super().__new__(cls, name, bases, attrs)
 
         if '_login' in attrs and name not in ('BaseQuery', 'QueryWithLogin'):
             # skip theses two classes, BaseQuery and QueryWithLogin, so
@@ -156,6 +177,37 @@ class LoginABCMeta(abc.ABCMeta):
         return newcls
 
 
+class BaseVOQuery:
+    """
+    Bare minimum base query that sets the Session header to include both astroquery and pyvo.
+    Use in modules that rely on PyVO, either on its own or in combination with ``BaseQuery`` (be mindful
+    about resolution order of base classes!).
+    """
+    def __init__(self):
+        super().__init__()
+        if not hasattr(self, '_session'):
+            # We don't want to override another, e.g. already authenticated session from another baseclass
+            self._session = requests.Session()
+
+        user_agents = self._session.headers['User-Agent'].split()
+        if 'astroquery' in user_agents[0]:
+            if 'pyVO' not in user_agents[1]:
+                user_agents[0] = f"astroquery/{version.version} pyVO/{pyvo.__version__}"
+        elif 'pyVO' in user_agents[0]:
+            user_agents[0] = f"astroquery/{version.version} pyVO/{pyvo.__version__}"
+        else:
+            user_agents = [f"astroquery/{version.version} pyVO/{pyvo.__version__} "
+                           f"Python/{platform.python_version()} ({platform.system()})"] + user_agents
+
+        self._session.headers['User-Agent'] = " ".join(user_agents)
+
+        self.name = self.__class__.__name__.split("Class")[0]
+
+    def __call__(self, *args, **kwargs):
+        """ init a fresh copy of self """
+        return self.__class__(*args, **kwargs)
+
+
 class BaseQuery(metaclass=LoginABCMeta):
     """
     This is the base class for all the query classes in astroquery. It
@@ -163,18 +215,14 @@ class BaseQuery(metaclass=LoginABCMeta):
     """
 
     def __init__(self):
-        S = self._session = requests.Session()
+        self._session = requests.Session()
         self._session.hooks['response'].append(self._response_hook)
-        S.headers['User-Agent'] = (
-            'astroquery/{vers} {olduseragent}'
-            .format(vers=version.version,
-                    olduseragent=S.headers['User-Agent']))
+        self._session.headers['User-Agent'] = (
+            f"astroquery/{version.version} Python/{platform.python_version()} ({platform.system()}) "
+            f"{self._session.headers['User-Agent']}")
 
-        self.cache_location = os.path.join(
-            paths.get_cache_dir(), 'astroquery',
-            self.__class__.__name__.split("Class")[0])
-        os.makedirs(self.cache_location, exist_ok=True)
-        self._cache_active = True
+        self.name = self.__class__.__name__.split("Class")[0]
+        self._cache_location = None
 
     def __call__(self, *args, **kwargs):
         """ init a fresh copy of self """
@@ -214,9 +262,28 @@ class BaseQuery(metaclass=LoginABCMeta):
                     f"-----------------------------------------", '\t')
             log.log(5, f"HTTP response\n{response_log}")
 
+    @property
+    def cache_location(self):
+        cl = self._cache_location or Path(paths.get_cache_dir(), 'astroquery', self.name)
+        cl.mkdir(parents=True, exist_ok=True)
+        return cl
+
+    @cache_location.setter
+    def cache_location(self, loc):
+        self._cache_location = Path(loc)
+
+    def reset_cache_location(self):
+        """Resets the cache location to the default astropy cache"""
+        self._cache_location = None
+
+    def clear_cache(self):
+        """Removes all cache files."""
+        for fle in self.cache_location.glob("*.pickle"):
+            fle.unlink()
+
     def _request(self, method, url,
                  params=None, data=None, headers=None,
-                 files=None, save=False, savedir='', timeout=None, cache=True,
+                 files=None, save=False, savedir='', timeout=None, cache=None,
                  stream=False, auth=None, continuation=True, verify=True,
                  allow_redirects=True,
                  json=None, return_response_on_save=False):
@@ -250,9 +317,10 @@ class BaseQuery(metaclass=LoginABCMeta):
             somewhere other than `BaseQuery.cache_location`
         timeout : int
         cache : bool
+            Optional, if specified, overrides global cache settings.
         verify : bool
             Verify the server's TLS certificate?
-            (see http://docs.python-requests.org/en/master/_modules/requests/sessions/?highlight=verify)
+            (see https://docs.python-requests.org/en/master/_modules/requests/sessions/?highlight=verify)
         continuation : bool
             If the file is partly downloaded to the target location, this
             parameter will try to continue the download where it left off.
@@ -274,40 +342,39 @@ class BaseQuery(metaclass=LoginABCMeta):
             and the server response object, if ``save`` is True and ``return_response_on_save``
             is True.
         """
-        req_kwargs = dict(
-            params=params,
-            data=data,
-            headers=headers,
-            files=files,
-            timeout=timeout,
-            json=json
-        )
+
+        if cache is None:  # Global caching not overridden
+            cache = cache_conf.cache_active
+
         if save:
             local_filename = url.split('/')[-1]
             if os.name == 'nt':
                 # Windows doesn't allow special characters in filenames like
                 # ":" so replace them with an underscore
                 local_filename = local_filename.replace(':', '_')
+
             local_filepath = os.path.join(savedir or self.cache_location or '.', local_filename)
 
-            response = self._download_file(url, local_filepath, cache=cache,
+            response = self._download_file(url, local_filepath, cache=cache, timeout=timeout,
                                            continuation=continuation, method=method,
                                            allow_redirects=allow_redirects,
-                                           auth=auth, **req_kwargs)
+                                           auth=auth, params=params, data=data, headers=headers,
+                                           files=files, json=json)
             if return_response_on_save:
                 return local_filepath, response
             else:
                 return local_filepath
         else:
-            query = AstroQuery(method, url, **req_kwargs)
-            if ((self.cache_location is None) or (not self._cache_active) or (not cache)):
-                with suspend_cache(self):
+            query = AstroQuery(method, url, params=params, data=data, headers=headers,
+                               files=files, timeout=timeout, json=json)
+            if not cache:
+                with cache_conf.set_temp("cache_active", False):
                     response = query.request(self._session, stream=stream,
                                              auth=auth, verify=verify,
                                              allow_redirects=allow_redirects,
                                              json=json)
             else:
-                response = query.from_cache(self.cache_location)
+                response = query.from_cache(self.cache_location, cache_conf.cache_timeout)
                 if not response:
                     response = query.request(self._session,
                                              self.cache_location,
@@ -317,12 +384,13 @@ class BaseQuery(metaclass=LoginABCMeta):
                                              verify=verify,
                                              json=json)
                     to_cache(response, query.request_file(self.cache_location))
+
             self._last_query = query
             return response
 
     def _download_file(self, url, local_filepath, timeout=None, auth=None,
                        continuation=True, cache=False, method="GET",
-                       head_safe=False, **kwargs):
+                       head_safe=False, verbose=True, **kwargs):
         """
         Download a file.  Resembles `astropy.utils.data.download_file` but uses
         the local ``_session``
@@ -338,8 +406,11 @@ class BaseQuery(metaclass=LoginABCMeta):
             supports HTTP "range" requests, the download will be continued
             where it left off.
         cache : bool
+            Cache downloaded file. Defaults to False.
         method : "GET" or "POST"
         head_safe : bool
+        verbose : bool
+            Whether to show download progress. Defaults to True.
         """
 
         if head_safe:
@@ -427,33 +498,40 @@ class BaseQuery(metaclass=LoginABCMeta):
         else:
             progress_stream = io.StringIO()
 
-        with ProgressBarOrSpinner(length, f'Downloading URL {url} to {local_filepath} ...',
-                                  file=progress_stream) as pb:
+        if verbose:
+            with ProgressBarOrSpinner(length, f'Downloading URL {url} to {local_filepath} ...',
+                                      file=progress_stream) as pb:
+                with open(local_filepath, open_mode) as f:
+                    for block in response.iter_content(blocksize):
+                        f.write(block)
+                        bytes_read += len(block)
+                        if length is not None:
+                            pb.update(bytes_read if bytes_read <= length else length)
+                        else:
+                            pb.update(bytes_read)
+        else:
             with open(local_filepath, open_mode) as f:
-                for block in response.iter_content(blocksize):
-                    f.write(block)
-                    bytes_read += len(block)
-                    if length is not None:
-                        pb.update(bytes_read if bytes_read <= length else length)
-                    else:
-                        pb.update(bytes_read)
+                f.write(response.content)
+
         response.close()
         return response
 
 
+@deprecated(since="v0.4.7", message=("The suspend_cache function is deprecated,"
+                                     "Use the conf set_temp function instead."))
 class suspend_cache:
     """
     A context manager that suspends caching.
     """
 
-    def __init__(self, obj):
-        self.obj = obj
+    def __init__(self, obj=None):
+        self.original_cache_setting = cache_conf.cache_active
 
     def __enter__(self):
-        self.obj._cache_active = False
+        cache_conf.cache_active = False
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.obj._cache_active = True
+        cache_conf.cache_active = self.original_cache_setting
         return False
 
 
@@ -468,7 +546,7 @@ class QueryWithLogin(BaseQuery):
     """
 
     def __init__(self):
-        super(QueryWithLogin, self).__init__()
+        super().__init__()
         self._authenticated = False
 
     def _get_password(self, service_name, username, reenter=False):
@@ -509,7 +587,7 @@ class QueryWithLogin(BaseQuery):
         pass
 
     def login(self, *args, **kwargs):
-        with suspend_cache(self):
+        with cache_conf.set_temp("cache_active", False):
             self._authenticated = self._login(*args, **kwargs)
         return self._authenticated
 

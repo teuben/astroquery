@@ -14,6 +14,11 @@ DATA_FILES = {'img': 'img.fits',
               }
 
 
+pytest.skip(allow_module_level=True,
+            reason="Skip tests in this file until as the upstream API has changed and is scheduled to be removed."
+            "https://github.com/astropy/astroquery/issues/2834")
+
+
 def data_path(filename):
     data_dir = os.path.join(os.path.dirname(__file__), 'data')
     return os.path.join(data_dir, filename)
@@ -22,8 +27,8 @@ def data_path(filename):
 def get_mockreturn(url, params=None, stream=False, timeout=10, **kwargs):
     if stream:
         filename = data_path(DATA_FILES['img'])
-        return MockResponse(open(filename, 'rb').read(),
-                            content_type='image/fits', **kwargs)
+        with open(filename, 'rb') as infile:
+            return MockResponse(infile.read(), content_type='image/fits', **kwargs)
     elif params['RA'] == 163.6136:
         filename = data_path(DATA_FILES['pos_t'])
     elif params['NAIFID'] == 2003226:
@@ -35,7 +40,8 @@ def get_mockreturn(url, params=None, stream=False, timeout=10, **kwargs):
     else:
         raise ValueError("Query not pre-loaded.")
 
-    content = open(filename, 'rb').read()
+    with open(filename, 'rb') as infile:
+        content = infile.read()
     return MockResponse(content, **kwargs)
 
 
@@ -49,19 +55,19 @@ def patch_get(request):
 
 def test_pos_t(patch_get):
     # Example queries for SHA API help page
-    pos_t = sha.query(ra=163.6136, dec=-11.784, size=0.5)
+    sha.query(ra=163.6136, dec=-11.784, size=0.5)
 
 
 def test_nid_t(patch_get):
-    nid_t = sha.query(naifid=2003226)
+    sha.query(naifid=2003226)
 
 
 def test_pid_t(patch_get):
-    pid_t = sha.query(pid=30080)
+    sha.query(pid=30080)
 
 
 def test_rqk_t(patch_get):
-    rqk_t = sha.query(reqkey=21641216)
+    sha.query(reqkey=21641216)
 
 
 def test_get_file(patch_get):
@@ -72,9 +78,9 @@ def test_get_file(patch_get):
     # Not implemented because running will download file
     # sha.save_file(table_url)
     # sha.save_file(image_url)
-    img = sha.get_file(image_url)
+    sha.get_file(image_url)
 
 
 def test_deprecated_namespace_import_warning():
     with pytest.warns(DeprecationWarning):
-        import astroquery.sha
+        import astroquery.sha  # noqa: F401

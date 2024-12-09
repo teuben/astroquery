@@ -69,16 +69,21 @@ def _gen_pos_sql(field, value):
                     dec_min = -90
                 if dec_max is None:
                     dec_max = 90
-                min_pt = coord.SkyCoord(ra_min, dec_min, unit=u.deg,
-                                        frame=frame)
-                max_pt = coord.SkyCoord(ra_max, dec_max, unit=u.deg,
-                                        frame=frame)
-                result += \
-                    "(INTERSECTS(RANGE_S2D({},{},{},{}), s_region) = 1)".\
-                    format(min_pt.icrs.ra.to(u.deg).value,
-                           max_pt.icrs.ra.to(u.deg).value,
-                           min_pt.icrs.dec.to(u.deg).value,
-                           max_pt.icrs.dec.to(u.deg).value)
+                ra_min = coord.Angle(ra_min, unit=u.degree).deg
+                ra_max = coord.Angle(ra_max, unit=u.degree).deg
+                dec_min = coord.Angle(dec_min, unit=u.degree).deg
+                dec_max = coord.Angle(dec_max, unit=u.degree).deg
+                if frame == 'galactic':
+                    # intersect with s_region is too complicated. ALMA indicated that
+                    # the use of gal_longitude and gal_latitude is good enough
+                    # approximation in this less common use case
+                    result += ('gal_longitude>={} AND gal_longitude<={} AND '
+                               'gal_latitude>={} AND gal_latitude<={}').format(
+                        ra_min, ra_max, dec_min, dec_max)
+                else:
+                    result += \
+                        "(INTERSECTS(RANGE_S2D({},{},{},{}), s_region) = 1)".\
+                        format(ra_min, ra_max, dec_min, dec_max)
             else:
                 raise ValueError('Cannot interpret ra({}), dec({}'.
                                  format(ra, dec))
@@ -167,38 +172,6 @@ def _gen_datetime_sql(field, value):
         return result
 
 
-def _gen_spec_res_sql(field, value):
-    # This needs special treatment because spectral_resolution in AQ is in
-    # KHz while corresponding em_resolution is in m
-    result = ''
-    for interval in _val_parse(value):
-        if result:
-            result += ' OR '
-        if isinstance(interval, tuple):
-            min_val, max_val = interval
-            if max_val is None:
-                result += "{}<={}".format(
-                    field,
-                    min_val*u.kHz.to(u.m, equivalencies=u.spectral()))
-            elif min_val is None:
-                result += "{}>={}".format(
-                    field,
-                    max_val*u.kHz.to(u.m, equivalencies=u.spectral()))
-            else:
-                result += "({1}<={0} AND {0}<={2})".format(
-                    field,
-                    max_val*u.kHz.to(u.m, equivalencies=u.spectral()),
-                    min_val*u.kHz.to(u.m, equivalencies=u.spectral()))
-        else:
-            result += "{}={}".format(
-                field, interval*u.kHz.to(u.m, equivalencies=u.spectral()))
-    if ' OR ' in result:
-        # use brackets for multiple ORs
-        return '(' + result + ')'
-    else:
-        return result
-
-
 def _gen_pub_sql(field, value):
     if value is True:
         return "{}='Public'".format(field)
@@ -279,6 +252,8 @@ def _val_parse(value, val_type=float):
         except Exception as e:
             raise ValueError(
                 'Error parsing {}. Details: {}'.format(value, str(e)))
+    elif isinstance(value, list):
+        result = value
     else:
         result.append(value)
     return result

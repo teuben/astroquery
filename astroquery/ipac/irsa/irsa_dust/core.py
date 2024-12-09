@@ -1,7 +1,9 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
+
+from astropy.coordinates import Angle, SkyCoord
+from astropy.coordinates.name_resolve import NameResolveError
 from astropy.table import Table, Column
 import astropy.units as u
-from astropy import coordinates
 
 from astroquery.ipac.irsa.irsa_dust import utils
 from astroquery.ipac.irsa.irsa_dust import conf
@@ -46,7 +48,7 @@ class IrsaDustClass(BaseQuery):
         '100um': 'e'
     }
 
-    def get_images(self, coordinate, radius=None,
+    def get_images(self, coordinate, *, radius=None,
                    image_type=None, timeout=TIMEOUT, get_query_payload=False,
                    show_progress=True):
         """
@@ -89,7 +91,7 @@ class IrsaDustClass(BaseQuery):
             get_query_payload=get_query_payload, show_progress=show_progress)
         return [obj.get_fits() for obj in readable_objs]
 
-    def get_images_async(self, coordinate, radius=None, image_type=None,
+    def get_images_async(self, coordinate, *, radius=None, image_type=None,
                          timeout=TIMEOUT, get_query_payload=False,
                          show_progress=True):
         """
@@ -139,7 +141,7 @@ class IrsaDustClass(BaseQuery):
                                       show_progress=show_progress)
                 for U in image_urls]
 
-    def get_image_list(self, coordinate, radius=None, image_type=None,
+    def get_image_list(self, coordinate, *, radius=None, image_type=None,
                        timeout=TIMEOUT):
         """
         Query function that performs coordinate-based query and returns a list
@@ -180,7 +182,7 @@ class IrsaDustClass(BaseQuery):
                                  timeout=timeout)
         return self.extract_image_urls(response.text, image_type=image_type)
 
-    def get_extinction_table(self, coordinate, radius=None, timeout=TIMEOUT,
+    def get_extinction_table(self, coordinate, *, radius=None, timeout=TIMEOUT,
                              show_progress=True):
         """
         Query function that fetches the extinction table from the query
@@ -218,7 +220,7 @@ class IrsaDustClass(BaseQuery):
                 column.unit = str(column.unit)[:-1]
         return table
 
-    def get_extinction_table_async(self, coordinate, radius=None,
+    def get_extinction_table_async(self, coordinate, *, radius=None,
                                    timeout=TIMEOUT, show_progress=True):
         """
         A query function similar to
@@ -251,11 +253,11 @@ class IrsaDustClass(BaseQuery):
         response = self._request("POST", url, data=request_payload,
                                  timeout=timeout)
         xml_tree = utils.xml(response.text)
-        result = SingleDustResult(xml_tree, coordinate)
+        result = SingleDustResult(xml_tree, query_loc=coordinate)
         return commons.FileContainer(result.ext_detail_table(),
                                      show_progress=show_progress)
 
-    def get_query_table(self, coordinate, radius=None,
+    def get_query_table(self, coordinate, *, radius=None,
                         section=None, timeout=TIMEOUT, url=DUST_SERVICE_URL):
         """
         Create and return an `~astropy.table.Table` representing the query
@@ -297,7 +299,7 @@ class IrsaDustClass(BaseQuery):
         response = self._request("POST", url, data=request_payload,
                                  timeout=timeout)
         xml_tree = utils.xml(response.text)
-        result = SingleDustResult(xml_tree, coordinate)
+        result = SingleDustResult(xml_tree, query_loc=coordinate)
         if section is None or section in ["location", "loc", "l"]:
             return result.table(section=section)
         try:
@@ -308,7 +310,7 @@ class IrsaDustClass(BaseQuery):
                    'ebv, temperature, location or 100um.')
             raise ValueError(msg)
 
-    def _args_to_payload(self, coordinate, radius=None):
+    def _args_to_payload(self, coordinate, *, radius=None):
         """
         Accepts the query parameters and returns a dictionary
         suitable to be sent as data via a HTTP POST request.
@@ -336,18 +338,18 @@ class IrsaDustClass(BaseQuery):
                 # If the coordinate is a resolvable name, pass that name
                 # directly to irsa_dust because it can handle it (and that
                 # changes the return value associated metadata)
-                C = commons.ICRSCoord.from_name(coordinate)
+                C = SkyCoord.from_name(coordinate, frame="icrs")
                 payload = {"locstr": coordinate}
-            except coordinates.name_resolve.NameResolveError:
+            except NameResolveError:
                 C = commons.parse_coordinates(coordinate).transform_to('fk5')
                 # check if this is resolvable?
                 payload = {"locstr": "{0} {1}".format(C.ra.deg, C.dec.deg)}
-        elif isinstance(coordinate, coordinates.SkyCoord):
+        elif isinstance(coordinate, SkyCoord):
             C = coordinate.transform_to('fk5')
             payload = {"locstr": "{0} {1}".format(C.ra.deg, C.dec.deg)}
         # check if radius is given with proper units
         if radius is not None:
-            reg_size = coordinates.Angle(radius).deg
+            reg_size = Angle(radius).deg
             # check if radius falls in the acceptable range
             if reg_size < 2 or reg_size > 37.5:
                 raise ValueError("Radius (in any unit) must be in the"
@@ -355,7 +357,7 @@ class IrsaDustClass(BaseQuery):
             payload["regSize"] = reg_size
         return payload
 
-    def extract_image_urls(self, raw_xml, image_type=None):
+    def extract_image_urls(self, raw_xml, *, image_type=None):
         """
         Extracts the image URLs from the query results and
         returns these as a list. If section is missing or
@@ -412,7 +414,7 @@ class SingleDustResult:
     initial response. Not intended to be instantiated by the end user.
     """
 
-    def __init__(self, xml_tree, query_loc=None):
+    def __init__(self, xml_tree, *, query_loc=None):
         """
         Parameters
         ----------
@@ -448,7 +450,7 @@ class SingleDustResult:
         """Return the raw xml underlying this SingleDustResult."""
         return self._xml
 
-    def table(self, section=None):
+    def table(self, *, section=None):
         """
         Create and return a `~astropy.table.Table` representing the query
         response.
@@ -465,7 +467,7 @@ class SingleDustResult:
         else:
             return self._table(code)
 
-    def values(self, section=None):
+    def values(self, *, section=None):
         """
         Return the data values contained in the query response,
         i.e. the list of values corresponding to a row in the result table.
@@ -550,8 +552,8 @@ class SingleDustResult:
         table : `~astropy.table.Table`
             table containing the data from the query response
         """
-        columns = (self._location_section.columns + self._ext_section.columns +
-                   self._em_section.columns + self._temp_section.columns)
+        columns = (self._location_section.columns + self._ext_section.columns
+                   + self._em_section.columns + self._temp_section.columns)
         table = Table(data=columns)
 
         values = self.values()
@@ -720,8 +722,7 @@ class StringNode(BaseDustNode):
     def __str__(self):
         """Return a string representation of this item."""
         base_string = BaseDustNode.__str__(self)
-        string = ("[StringNode: " + base_string +
-                  ", value: " + self._value + "]")
+        string = "[StringNode: " + base_string + ", value: " + self._value + "]"
         return string
 
 
@@ -732,7 +733,7 @@ class NumberNode(BaseDustNode):
     number.
     """
 
-    def __init__(self, xml_node, col_name, units=None):
+    def __init__(self, xml_node, col_name, *, units=None):
         """
         Parameters
         ----------
@@ -751,8 +752,7 @@ class NumberNode(BaseDustNode):
         """Return a string representation of the item."""
         base_string = BaseDustNode.__str__(self)
 
-        string = ("[NumberNode: " + base_string +
-                  ", value: " + str(self._value) + "]")
+        string = "[NumberNode: " + base_string + ", value: " + str(self._value) + "]"
         return string
 
 
@@ -782,8 +782,7 @@ class CoordNode(BaseDustNode):
     def __str__(self):
         """Return a string representation of the item."""
         base_string = BaseDustNode.__str__(self)
-        values_str = ("values: " + str(self._value[0]) + ", " +
-                      str(self._value[1]) + ", " + str(self._value[2]))
+        values_str = "values: " + str(self._value[0]) + ", " + str(self._value[1]) + ", " + str(self._value[2])
         string = ("[CoordNode: " + base_string + ", " + values_str + "]")
         return string
 
@@ -882,7 +881,7 @@ class LocationSection(BaseResultSection):
         # Create the section's DustNodes
         self._dust_nodes = [CoordNode(
             xml_nodes[OBJ_NAME], col_names=["RA", "Dec", "coord sys"]),
-            NumberNode(xml_nodes[REG_SIZE], REG_SIZE, u.deg)]
+            NumberNode(xml_nodes[REG_SIZE], REG_SIZE, units=u.deg)]
 
         self.create_columns()
 
@@ -900,7 +899,7 @@ class StatsSection(BaseResultSection):
     section.
     """
 
-    def __init__(self, xml_root, col_prefix, suffix=""):
+    def __init__(self, xml_root, col_prefix, *, suffix=""):
         """
         Parameters
         ----------
@@ -985,8 +984,8 @@ class ExtinctionSection(BaseResultSection):
 
         # Create statistics subsections
         self._stats_sandf = StatsSection(xml_nodes[STATISTICS],
-                                         "ext SandF", "SandF")
-        self._stats_sfd = StatsSection(xml_nodes[STATISTICS], "ext SFD", "SFD")
+                                         "ext SandF", suffix="SandF")
+        self._stats_sfd = StatsSection(xml_nodes[STATISTICS], "ext SFD", suffix="SFD")
 
         self.create_columns()
 
@@ -1019,9 +1018,7 @@ class ExtinctionSection(BaseResultSection):
     def __str__(self):
         """Return a string representation of the section."""
         base_string = BaseResultSection.__str__(self)
-        string = ("[ExtinctionSection: " + base_string +
-                  self._stats_sandf.__str__() +
-                  self._stats_sfd.__str__() + "]")
+        string = f"[ExtinctionSection: {base_string} {self._stats_sandf.__str__()} {self._stats_sfd.__str__()}]"
 
         return string
 

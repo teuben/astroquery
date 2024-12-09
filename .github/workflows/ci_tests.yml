@@ -1,3 +1,4 @@
+# Developer version testing as well as cron testings are in separate workflows
 name: CI
 
 on:
@@ -12,13 +13,21 @@ on:
   schedule:
     # run every Monday at 5am UTC
     - cron: '0 5 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   tests:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
 
@@ -27,37 +36,31 @@ jobs:
             python: 3.x
             toxenv: codestyle
 
-          - name: oldest dependencies
+          - name: oldest version for all dependencies
             os: ubuntu-latest
-            python: 3.7
-            toxenv: py37-test-oldestdeps
+            python: "3.9"
+            toxenv: py39-test-oldestdeps-alldeps
             toxargs: -v
 
-          - name: astropy dev with all dependencies with coverage
-            os: ubuntu-latest
-            python: '3.10'
-            toxenv: py310-test-alldeps-devastropy-cov
-            toxargs: -v
-
-          - name: Python 3.8 with all optional dependencies (MacOS X)
+          - name: Python 3.10 with all optional dependencies (MacOS X)
             os: macos-latest
-            python: 3.8
-            toxenv: py38-test-alldeps
+            python: "3.10"
+            toxenv: py310-test-alldeps
             toxargs: -v
 
-          - name: Python 3.9 with mandatory dependencies (Windows)
+          - name: Python 3.11 with mandatory dependencies (Windows)
             os: windows-latest
-            python: 3.9
-            toxenv: py39-test
+            python: "3.11"
+            toxenv: py311-test
             toxargs: -v
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v2
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
       with:
         fetch-depth: 0
     - name: Set up Python
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
       with:
         python-version: ${{ matrix.python }}
     - name: Install Python dependencies
@@ -66,42 +69,21 @@ jobs:
       run: tox ${{ matrix.toxargs }} -e ${{ matrix.toxenv }} -- ${{ matrix.toxposargs }}
     - name: Upload coverage to codecov
       if: contains(matrix.toxenv,'-cov')
-      uses: codecov/codecov-action@v2
+      uses: codecov/codecov-action@015f24e6818733317a2da2edd6290ab26238649a  # v5.0.7
       with:
         file: ./coverage.xml
 
-  # This needs to be outside of matrix because if is not supported
-  # for only one job in a matrix. But once that is supported, this can go
-  # back to the matrix above.
-  remote_data:
-    name: Python 3.8 with all dependencies with remote data
-    if: github.event_name == 'schedule' && github.repository == 'astropy/astroquery'
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v2
-      with:
-        fetch-depth: 0
-    - name: Set up Python
-      uses: actions/setup-python@v2
-      with:
-        python-version: '3.8'
-    - name: Install Python dependencies
-      run: python -m pip install --upgrade tox
-    - name: Run tests
-      run: tox -v -e py38-test-alldeps-devastropy -- --remote-data
-
   egg_info:
-    name: egg_info with Python 3.7
+    name: egg_info with Python 3.9
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@v2
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
       with:
         fetch-depth: 0
     - name: Set up Python
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
       with:
-        python-version: 3.7
+        python-version: "3.9"
     - name: Run egg_info
       run: python setup.py egg_info

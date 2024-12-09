@@ -1,13 +1,12 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """
-
-@author: Jesus Salgado
-@contact: jesusjuansalgado@gmail.com
+=====================
+ISO Astroquery Module
+=====================
 
 European Space Astronomy Centre (ESAC)
 European Space Agency (ESA)
 
-Created on 15 July 2020
 """
 
 import pytest
@@ -16,13 +15,13 @@ from astroquery.esa.iso import ISOClass
 from astroquery.esa.iso.tests.dummy_tap_handler import DummyISOTapHandler
 
 
-class TestISO():
+class TestISO:
 
     def get_dummy_tap_handler(self):
         parameters = {'query': "select top 10 * from ida.observations",
-                       'output_file': "test2.vot",
-                       'output_format': "votable",
-                       'verbose': False}
+                      'output_file': "test2.vot",
+                      'output_format': "votable",
+                      'verbose': False}
         dummyTapHandler = DummyISOTapHandler("launch_job", parameters)
         return dummyTapHandler
 
@@ -33,7 +32,7 @@ class TestISO():
                       'filename': "file",
                       'verbose': False}
         ida = ISOClass(self.get_dummy_tap_handler())
-        link = ida.get_download_link(**parameters)
+        ida.get_download_link(**parameters)
 
     def test_get_download_link_verbose(self):
         parameters = {'tdt': "40001501",
@@ -42,26 +41,26 @@ class TestISO():
                       'filename': "file",
                       'verbose': True}
         ida = ISOClass(self.get_dummy_tap_handler())
-        link = ida.get_download_link(**parameters)
+        ida.get_download_link(**parameters)
 
     def test_get_postcard_link(self):
         parameters = {'tdt': "40001501",
                       'filename': "file",
                       'verbose': False}
         ida = ISOClass(self.get_dummy_tap_handler())
-        link = ida.get_postcard_link(**parameters)
+        ida.get_postcard_link(**parameters)
 
     def test_get_postcard_link_verbose(self):
         parameters = {'tdt': "40001501",
                       'filename': "file",
                       'verbose': True}
         ida = ISOClass(self.get_dummy_tap_handler())
-        link = ida.get_postcard_link(**parameters)
+        ida.get_postcard_link(**parameters)
 
     @pytest.mark.remote_data
-    def test_download_data(self):
+    def test_download_data(self, tmp_cwd):
         parameters = {'tdt': "40001501",
-                      'level': "DEFAULT_DATA_SET",
+                      'product_level': "DEFAULT_DATA_SET",
                       'retrieval_type': "OBSERVATION",
                       'filename': "file",
                       'verbose': False}
@@ -70,7 +69,7 @@ class TestISO():
         assert res == "file.tar", "File name is " + res + " and not file.tar"
 
     @pytest.mark.remote_data
-    def test_download_postcard(self):
+    def test_download_postcard(self, tmp_cwd):
         parameters = {'tdt': "40001501",
                       'filename': "file",
                       'verbose': False}
@@ -90,7 +89,7 @@ class TestISO():
 
     def test_get_tables(self):
         parameters = {'only_names': True,
-                       'verbose': True}
+                      'verbose': True}
 
         dummyTapHandler = DummyISOTapHandler("get_tables", parameters)
         ida = ISOClass(self.get_dummy_tap_handler())
@@ -99,8 +98,8 @@ class TestISO():
 
     def test_get_columns(self):
         parameters = {'table_name': "table",
-                       'only_names': True,
-                       'verbose': True}
+                      'only_names': True,
+                      'verbose': True}
 
         dummyTapHandler = DummyISOTapHandler("get_columns", parameters)
         ida = ISOClass(self.get_dummy_tap_handler())
@@ -109,17 +108,17 @@ class TestISO():
 
     def test_get_tables_onlynames_false(self):
         parameters = {'only_names': False,
-                       'verbose': True}
+                      'verbose': True}
 
-        dummyTapHandler = DummyISOTapHandler("get_tables", parameters)
+        DummyISOTapHandler("get_tables", parameters)
         ida = ISOClass(self.get_dummy_tap_handler())
         ida.get_tables(only_names=False, verbose=True)
 
     def test_get_columns_onlynames_false(self):
         parameters = {'table_name': "table",
-                       'only_names': False,
-                       'verbose': True}
+                      'only_names': False,
+                      'verbose': True}
 
-        dummyTapHandler = DummyISOTapHandler("get_columns", parameters)
+        DummyISOTapHandler("get_columns", parameters)
         ida = ISOClass(self.get_dummy_tap_handler())
         ida.get_columns("table", only_names=False, verbose=True)

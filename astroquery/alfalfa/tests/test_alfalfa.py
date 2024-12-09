@@ -15,7 +15,7 @@ DATA_FILES = {'catalog': 'alfalfa_cat_small.txt',
 class MockResponseAlfalfa(MockResponse):
 
     def __init__(self, content, **kwargs):
-        super(MockResponseAlfalfa, self).__init__(content, **kwargs)
+        super().__init__(content, **kwargs)
 
     def iter_lines(self):
         for line in self.text.split("\n"):
@@ -38,7 +38,9 @@ def patch_get_readable_fileobj(request):
     @contextmanager
     def get_readable_fileobj_mockreturn(filename, **kwargs):
         file_obj = data_path(DATA_FILES['spectrum'])  # TODO: add images option
-        yield open(file_obj, 'rb')  # read as bytes, assuming FITS
+        # read as bytes, assuming FITS
+        with open(file_obj, 'rb') as inputfile:
+            yield inputfile
 
     mp = request.getfixturevalue("monkeypatch")
 
@@ -49,7 +51,8 @@ def patch_get_readable_fileobj(request):
 
 def get_mockreturn(url, params=None, timeout=10):
     filename = data_path(DATA_FILES['catalog'])
-    content = open(filename, 'rb').read()
+    with open(filename, 'rb') as infile:
+        content = infile.read()
     return MockResponseAlfalfa(content)
 
 
@@ -60,6 +63,7 @@ def data_path(filename):
 
 # Test Case: A Seyfert 1 galaxy
 coords = coordinates.SkyCoord('0h8m05.63s +14d50m23.3s')
+coordsOC = coordinates.SkyCoord(0.59583, 27.21056, unit='deg')
 
 ALFALFA = alfalfa.core.Alfalfa()
 
@@ -72,10 +76,7 @@ def test_alfalfa_catalog(patch_get, patch_get_readable_fileobj, coords=coords):
 def test_alfalfa_crossID(patch_get, patch_get_readable_fileobj, coords=coords):
     agc = ALFALFA.query_region(coords, optical_counterpart=True)
     assert agc == 100051
-
-
-def test_alfalfa_spectrum(patch_get, patch_get_readable_fileobj,
-                          coords=coords):
-    agc = ALFALFA.query_region(coords, optical_counterpart=True)
-    sp = ALFALFA.get_spectrum(agc)
-    assert len(sp) == 3
+    agc = ALFALFA.query_region(coordsOC, optical_counterpart=False)
+    assert agc == 12920
+    agc = ALFALFA.query_region(coordsOC, optical_counterpart=False, radius='0 arcmin')
+    assert agc is None

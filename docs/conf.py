@@ -64,13 +64,12 @@ rst_epilog += """
 
 del intersphinx_mapping['scipy']
 del intersphinx_mapping['h5py']
+
 intersphinx_mapping.update({
-    'astropy': ('https://docs.astropy.org/en/stable/', None),
-    'requests': ('https://requests.kennethreitz.org/en/stable/', None),
-    'pyregion': ('https://pyregion.readthedocs.io/en/stable/', None),
-    'regions': ('https://astropy-regions.readthedocs.io/en/stable/', None),
-    'mocpy': ('https://cds-astro.github.io/mocpy/', None),
-    'pyvo': ('https://pyvo.readthedocs.io/en/stable/', None),
+    'requests': ('https://requests.kennethreitz.org/en/stable', None),
+    'regions': ('https://astropy-regions.readthedocs.io/en/stable', None),
+    'mocpy': ('https://cds-astro.github.io/mocpy', None),
+    'pyvo': ('https://pyvo.readthedocs.io/en/stable', None),
 })
 
 # -- Project information ------------------------------------------------------
@@ -79,7 +78,7 @@ intersphinx_mapping.update({
 project = setup_cfg['name']
 author = setup_cfg['author']
 copyright = '{0}, {1}'.format(
-    datetime.datetime.now().year, setup_cfg['author'])
+    datetime.datetime.now(datetime.timezone.utc).year, setup_cfg['author'])
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the

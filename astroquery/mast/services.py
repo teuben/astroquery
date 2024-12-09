@@ -6,33 +6,35 @@ MAST Microservices API
 This module contains various methods for querying MAST microservice APIs.
 """
 
-import json
 import time
 import warnings
 
 import numpy as np
 
-from astropy.table import Table, Column, MaskedColumn
+from astropy.table import Table, MaskedColumn
+from astropy.utils.decorators import deprecated_renamed_argument
 
 from ..query import BaseQuery
 from ..utils import async_to_sync
 from ..utils.class_or_instance import class_or_instance
 from ..exceptions import TimeoutError, NoResultsWarning
 
-from . import conf, utils
+from . import conf
 
 
-__all__ = []
+__all__ = ["ServiceAPI"]
 
 
-def _json_to_table(json_obj):
+def _json_to_table(json_obj, data_key='data'):
     """
     Takes a JSON object as returned from a MAST microservice request and turns it into an `~astropy.table.Table`.
 
     Parameters
     ----------
-    json_obj : dict
+    json_obj : data array or list of dictionaries
         A MAST microservice response JSON object (python dictionary)
+    data_key : str
+        string that contains the key name in json_obj that stores the data rows
 
     Returns
     -------
@@ -40,46 +42,53 @@ def _json_to_table(json_obj):
     """
     data_table = Table(masked=True)
 
-    if not all(x in json_obj.keys() for x in ['info', 'data']):
-        raise KeyError("Missing required key(s) 'data' and/or 'info.'")
+    if not all(x in json_obj.keys() for x in ['info', data_key]):
+        raise KeyError(f"Missing required key(s) {data_key} and/or 'info.'")
 
     # determine database type key in case missing
     type_key = 'type' if json_obj['info'][0].get('type') else 'db_type'
 
     # for each item in info, store the type and column name
-    for idx, col, col_type, ignore_value in \
-            [(idx, x['name'], x[type_key], "NULL") for idx, x in enumerate(json_obj['info'])]:
+    # for each item in info, type has to be converted from DB data types (SQL server in most cases)
+    # from missions_mast search service such as varchar, integer, float, boolean etc
+    # to corresponding numpy type
+    for idx, col in enumerate(json_obj['info']):
 
-        # if default value is NULL, set ignore value to None
-        if ignore_value == "NULL":
-            ignore_value = None
+        # get column name and type
+        col_name = col.get('column_name') or col.get('name')
+        col_type = col[type_key].lower()
+        ignore_value = None
+
         # making type adjustments
-        if col_type == "char" or col_type == "STRING":
+        if (col_type == "char" or col_type == "string" or 'varchar' in col_type or col_type == "null"
+                or col_type == 'datetime'):
             col_type = "str"
-            ignore_value = "" if (ignore_value is None) else ignore_value
-        elif col_type == "boolean" or col_type == "BINARY":
+            ignore_value = ""
+        elif col_type == "boolean" or col_type == "binary":
             col_type = "bool"
-        elif col_type == "unsignedByte":
+        elif col_type == "unsignedbyte":
             col_type = np.ubyte
-        elif col_type == "int" or col_type == "short" or col_type == "long" or col_type == "NUMBER":
+        elif (col_type == "int" or col_type == "short" or col_type == "long" or col_type == "number"
+                or col_type == 'integer'):
             # int arrays do not admit Non/nan vals
             col_type = np.int64
-            ignore_value = -999 if (ignore_value is None) else ignore_value
-        elif col_type == "double" or col_type == "float" or col_type == "DECIMAL":
+            ignore_value = -999
+        elif col_type == "double" or col_type.lower() == "float" or col_type == "decimal":
             # int arrays do not admit Non/nan vals
             col_type = np.float64
-            ignore_value = -999 if (ignore_value is None) else ignore_value
-        elif col_type == "DATETIME":
-            col_type = "str"
-            ignore_value = "" if (ignore_value is None) else ignore_value
+            ignore_value = -999
 
         # Make the column list (don't assign final type yet or there will be errors)
-        # Step through data array of values
-        col_data = np.array([x[idx] for x in json_obj['data']], dtype=object)
+        try:
+            # Step through data array of values
+            col_data = np.array([x[idx] for x in json_obj[data_key]], dtype=object)
+        except KeyError:
+            # it's not a data array, fall back to using column name as it is array of dictionaries
+            col_data = np.array([x[col_name] for x in json_obj[data_key]], dtype=object)
         if ignore_value is not None:
             col_data[np.where(np.equal(col_data, None))] = ignore_value
 
-        # no consistant way to make the mask because np.equal fails on ''
+        # no consistent way to make the mask because np.equal fails on ''
         # and array == value fails with None
         if col_type == 'str':
             col_mask = (col_data == ignore_value)
@@ -87,7 +96,7 @@ def _json_to_table(json_obj):
             col_mask = np.equal(col_data, ignore_value)
 
         # add the column
-        data_table.add_column(MaskedColumn(col_data.astype(col_type), name=col, mask=col_mask))
+        data_table.add_column(MaskedColumn(col_data.astype(col_type), name=col_name, mask=col_mask))
 
     return data_table
 
@@ -95,9 +104,9 @@ def _json_to_table(json_obj):
 @async_to_sync
 class ServiceAPI(BaseQuery):
     """
-    MAST microservice API calss.
+    MAST microservice API calls.
 
-    Class that allows direct programatic access to MAST microservice APIs.
+    Class that allows direct programmatic access to MAST microservice APIs.
     Should be used to facilitate all microservice API queries.
     """
 
@@ -139,7 +148,7 @@ class ServiceAPI(BaseQuery):
         self.SERVICES = service_dict
 
     def _request(self, method, url, params=None, data=None, headers=None,
-                 files=None, stream=False, auth=None, cache=False):
+                 files=None, stream=False, auth=None, cache=False, use_json=False):
         """
         Override of the parent method:
         A generic HTTP request method, similar to `~requests.Session.request`
@@ -164,7 +173,9 @@ class ServiceAPI(BaseQuery):
         stream : bool
             See `~requests.request`
         cache : bool
-            Default False. Use of bulit in _request caching
+            Default False. Use of built in caching
+        use_json: bool
+            Default False. if True then data is already in json format.
 
         Returns
         -------
@@ -174,8 +185,12 @@ class ServiceAPI(BaseQuery):
 
         start_time = time.time()
 
-        response = super()._request(method, url, params=params, data=data, headers=headers,
-                                    files=files, cache=cache, stream=stream, auth=auth)
+        if use_json:
+            response = super()._request(method, url, params=params, json=data, headers=headers,
+                                        files=files, cache=cache, stream=stream, auth=auth)
+        else:
+            response = super()._request(method, url, params=params, data=data, headers=headers,
+                                        files=files, cache=cache, stream=stream, auth=auth)
 
         if (time.time() - start_time) >= self.TIMEOUT:
             raise TimeoutError("Timeout limit of {} exceeded.".format(self.TIMEOUT))
@@ -183,7 +198,7 @@ class ServiceAPI(BaseQuery):
         response.raise_for_status()
         return response
 
-    def _parse_result(self, response, verbose=False):
+    def _parse_result(self, response, verbose=False, data_key='data'):
         """
         Parses the results of a  `~requests.Response` object and returns an `~astropy.table.Table` of results.
 
@@ -195,6 +210,8 @@ class ServiceAPI(BaseQuery):
             (presently does nothing - there is no output with verbose set to
             True or False)
             Default False.  Setting to True provides more extensive output.
+        data_key : str
+            the key in response that contains the data rows
 
         Returns
         -------
@@ -202,7 +219,7 @@ class ServiceAPI(BaseQuery):
         """
 
         result = response.json()
-        result_table = _json_to_table(result)
+        result_table = _json_to_table(result, data_key=data_key)
 
         # Check for no results
         if not result_table:
@@ -210,9 +227,10 @@ class ServiceAPI(BaseQuery):
         return result_table
 
     @class_or_instance
-    def service_request_async(self, service, params, page_size=None, page=None, **kwargs):
+    @deprecated_renamed_argument('page_size', 'pagesize', since='0.4.8')
+    def service_request_async(self, service, params, pagesize=None, page=None, use_json=False, **kwargs):
         """
-        Given a MAST fabric service and parameters, builds and excecutes a fabric microservice catalog query.
+        Given a MAST fabric service and parameters, builds and executes a fabric microservice catalog query.
         See documentation `here <https://catalogs.mast.stsci.edu/docs/index.html>`__
         for information about how to build a MAST catalogs microservice  request.
 
@@ -222,7 +240,7 @@ class ServiceAPI(BaseQuery):
            The MAST catalogs service to query. Should be present in self.SERVICES
         params : dict
            JSON object containing service parameters.
-        page_size : int, optional
+        pagesize : int, optional
            Default None.
            Can be used to override the default pagesize (set in configs) for this query only.
            E.g. when using a slow internet connection.
@@ -230,6 +248,8 @@ class ServiceAPI(BaseQuery):
            Default None.
            Can be used to override the default behavior of all results being returned to obtain
            a specific page of results.
+        use_json: bool, optional
+           if True, params are directly passed as json object
         **kwargs :
            See Catalogs.MAST properties in documentation referenced above
 
@@ -252,26 +272,50 @@ class ServiceAPI(BaseQuery):
 
         headers = {
             'User-Agent': self._session.headers['User-Agent'],
-            'Content-type': 'application/x-www-form-urlencoded',
+            'Content-Type': 'application/x-www-form-urlencoded',
             'Accept': 'application/json'
         }
         # Params as a list of tuples to allow for multiple parameters added
         catalogs_request = []
         if not page:
             page = params.pop('page', None)
-        if not page_size:
-            page_size = params.pop('page_size', None)
+        if not pagesize:
+            pagesize = params.pop('pagesize', None)
 
         if page is not None:
             catalogs_request.append(('page', page))
-        if page_size is not None:
-            catalogs_request.append(('pagesize', page_size))
+        if pagesize is not None:
+            catalogs_request.append(('pagesize', pagesize))
 
-        # Decompose filters, sort
-        for prop, value in kwargs.items():
-            params[prop] = value
-        catalogs_request.extend(self._build_catalogs_params(params))
-        response = self._request('POST', request_url, data=catalogs_request, headers=headers)
+        if not use_json:
+            # Decompose filters, sort
+            for prop, value in kwargs.items():
+                params[prop] = value
+            catalogs_request.extend(self._build_catalogs_params(params))
+        else:
+            headers['Content-Type'] = 'application/json'
+
+            # Parameter syntax needs to be updated only for PANSTARRS catalog queries
+            if service.lower() == 'panstarrs':
+                catalogs_request.extend(self._build_catalogs_params(params))
+
+                # After parameter syntax is updated, revert back to dictionary
+                # so params can be passed as a JSON dictionary
+                params_dict = {}
+                for key, val in catalogs_request:
+                    params_dict.setdefault(key, []).append(val)
+                catalogs_request = params_dict
+
+                # Removing single-element lists. Single values will live on their own (except for `sort_by`)
+                for key in catalogs_request.keys():
+                    if (key != 'sort_by') & (len(catalogs_request[key]) == 1):
+                        catalogs_request[key] = catalogs_request[key][0]
+
+            # Otherwise, catalogs_request can remain as the original params dict
+            else:
+                catalogs_request = params
+
+        response = self._request('POST', request_url, data=catalogs_request, headers=headers, use_json=use_json)
         return response
 
     def _build_catalogs_params(self, params):
@@ -293,7 +337,7 @@ class ServiceAPI(BaseQuery):
             if prop == 'format':
                 # Ignore format changes
                 continue
-            elif prop == 'page_size':
+            elif prop == 'pagesize':
                 catalog_params.extend(('pagesize', value))
             elif prop == 'sort_by':
                 # Loop through each value if list
@@ -316,7 +360,7 @@ class ServiceAPI(BaseQuery):
             else:
                 if isinstance(value, list):
                     # A composed list of multiple filters for a single column
-                        # Extract each filter value in list
+                    # Extract each filter value in list
                     for filter_value in value:
                         # Determine if tuple with filter decorator
                         if isinstance(filter_value, tuple):

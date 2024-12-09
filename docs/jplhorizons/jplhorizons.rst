@@ -1,5 +1,3 @@
-.. doctest-skip-all
-
 .. _astroquery.jplhorizons:
 
 ***********************************************************************************
@@ -35,43 +33,97 @@ identical to the one presented here.
 In order to query information for a specific Solar System body, a
 ``Horizons`` object has to be instantiated:
 
-.. code-block:: python
+.. doctest-remote-data::
 
    >>> from astroquery.jplhorizons import Horizons
    >>> obj = Horizons(id='Ceres', location='568', epochs=2458133.33546)
    >>> print(obj)
    JPLHorizons instance "Ceres"; location=568, epochs=[2458133.33546], id_type=None
 
-``id`` refers to the target identifier and is mandatory; the exact
-string will be used in the query to the Horizons system.
+``id`` refers to the target object and is mandatory. ````str`` and ``int`` values
+are valid for all query types. ``Mapping`` (e.g. ``dict``) values are valid for
+observer (``ephemerides``) and vectors queries only. ``str`` or ``int`` values will be
+passed directly to Horizons. See the description of the ``id_type`` argument below
+for how Horizons interprets these values. See the paragraph below the description
+of the ``location`` argument for valid ``dict`` formatting.
 
-``location`` means either the observer's location (e.g., Horizons ephemerides
-query) or the body relative to which orbital elements are provided (e.g.,
-Horizons orbital elements or vectors query); the same codes as `used by Horizons
-<https://ssd.jpl.nasa.gov/horizons/manual.html#center>`_ are used here, which
-includes `MPC Observatory codes`_. The default is ``location=None``, which uses
-a geocentric location for ephemerides queries and the Sun as central body for
-orbital elements and state vector queries. User-defined topocentric locations
-for ephemerides queries can be provided, too, in the form of a dictionary. The
-dictionary has to be formatted as follows: {``'lon'``: longitude in degrees
-(East positive, West negative), ``'lat'``: latitude in degrees (North positive,
-South negative), ``'elevation'``: elevation in km above the reference
-ellipsoid}. In addition, ``'body'`` can be set to the Horizons body ID of the
-central body if different from Earth; by default, it is assumed that this
-location is on Earth if it has not been specifically set. The following example
-uses the coordinates of the `Statue of Liberty
+``location`` refers to the coordinate center for the ephemeris, which has
+slightly different physical interpretations depending on the query type:
+observer (``ephemerides``) queries: observer location
+vectors queries: coordinate origin for vectors
+elements queries: relative body for orbital elements
+
+``str`` and ``int`` values are valid for all query types. ``Mapping``
+(e.g. ``dict``) values are valid for observer (``ephemerides``) and vectors queries only. ``str`` or ``int``
+arguments will be passed directly to Horizons. See `this section of the Horizons
+manual`_ for how Horizons interprets coordinate center codes; also note that,
+unlike ``id``, these include (most) `MPC Observatory codes`_. See below for valid
+``dict`` formatting. The default is ``location=None``, which uses Earth body center
+for observer queries, and Sun body center for orbital elements and vectors queries.
+
+``dict``-like arguments to ``id`` or ``location`` define a topocentric location
+relative to a major body. Note that this is not possible for elements queries,
+and will only work for bodies with defined rotation models (Horizons does not
+have rotation models for many small or recently-discovered natural satellites).
+The dictionary has to be formatted as follows: {``'lon'``: longitude in degrees,
+``'lat'``: latitude in degrees (North positive, South negative), ``'elevation'``:
+elevation in km above the reference ellipsoid, ``body``: Horizons ID of center body,
+optional; default Earth}.
+
+Horizons always interprets longitude values as eastward. However, there are two
+major gotchas in this:
+1. For most prograde rotators, which is to say most major bodies, Horizons
+interprets west-longitude as positive and east-longitude as negative. However, values
+must still be entered in east-longitude, which means they must be negative; Horizons
+will raise an error if given any positive longitude value for such bodies. Instead enter
+the west-longitude - 360. For instance, a site on Mars (id code 499) at 30 degrees
+longitude, 30 degrees latitude, 0 km elevation should be specified as
+``{'body': 499, 'elevation': 0 * u.km, 'lon': -330 * u.deg, 'lat': 30 * u.deg}``.
+2. This does not apply to the Earth, Moon, and Sun. Although they are prograde,
+Horizons interprets east-longitude as positive and west-longitude as negative for these
+bodies.
+
+Here is a complete list of retrograde major bodies in Horizons:  Venus (299), Arial (701),
+Umbriel (702), Titania (703), Oberon (704), Miranda (705), Cordelia (706), Ophelia (707),
+Bianca (708), Cressida (709), Desdemona (710), Juliet (711), Portia (712), Rosalind (713),
+Belinda (714), Puck (715), Uranus (799), Triton (801). All other major bodies are prograde.
+
+Two examples of usage for specified topocentric coordinates follow.
+
+1. This observer (``ephemerides``) query uses the coordinates of the `Statue of Liberty
 <https://www.google.com/maps/place/Statue+of+Liberty+National+Monument/@40.6892534,-74.0466891,17z/data=!3m1!4b1!4m5!3m4!1s0x89c25090129c363d:0x40c6a5770d25022b!8m2!3d40.6892494!4d-74.0445004>`_
-as the observer's location:
+as the observer's location, and Ceres as the target:
 
-    >>> statue_of_liberty = {'lon': -74.0466891,
-    ...                      'lat': 40.6892534,
-    ...                      'elevation': 0.093}
+.. doctest-remote-data::
+
+    >>> import astropy.units as u
+    >>> statue_of_liberty = {'lon': -74.0466891 * u.deg,
+    ...                      'lat': 40.6892534 * u.deg,
+    ...                      'elevation': 0.093 * u.km}
     >>> obj = Horizons(id='Ceres',
     ...                location=statue_of_liberty,
     ...                epochs=2458133.33546)
-    JPLHorizons instance "Ceres"; location={'lon': -74.0466891, 'lat': 40.6892534, 'elevation': 0.093}, epochs=[2458133.33546], id_type=None
+    >>> print(obj)
+    JPLHorizons instance "Ceres"; location={'lon': <Quantity -74.0466891 deg>, 'lat': <Quantity 40.6892534 deg>, 'elevation': <Quantity 0.093 km>, 'body': 399}, epochs=[2458133.33546], id_type=None
 
+2. Specifying topocentric coordinates for both location and observer is often
+useful when performing geometric calculations for artificial satellites without
+completely-specified ephemeris data. For instance, published reduced data for the
+lunar satellite Chang'e-2 include orbital height and lat/lon. Although there is no published
+ephemeris for Chang'e-2, Horizons (combined with the fact that Chang'e-2 looked nadir),
+can be used to compute vectors from Chang'e-2 to specific points on the lunar surface.
+Here is an example of using ``jplhorizons`` to find the distance from Chang'e-2
+at a particular point in time to the center of the crater Double:
 
+.. doctest-remote-data::
+
+    >>> ce_2 = {'lon': 23.522 * u.deg, 'lat': 0.637 * u.deg, 'elevation': 181.2 * u.km, 'body': 301}
+    >>> double = {'lon': 23.47 * u.deg, 'lat': 0.67 * u.deg, 'elevation': 0 * u.km, 'body': 301}
+    >>> obj = Horizons(id=double, location=ce_2, epochs=2454483.84247)
+    >>> vecs = obj.vectors()
+    >>> distance_km = (vecs['x'] ** 2 + vecs['y'] ** 2 + vecs['z'] ** 2) ** 0.5 * 1.496e8
+    >>> print(f"{distance_km.value.data[0]:.3f}")
+    181.213
 
 ``epochs`` is either a scalar or list of Julian dates (floats or strings) in the
 case of discrete epochs, or, in the case of a range of epochs, a dictionary that
@@ -105,20 +157,21 @@ In the case of ambiguities in the name resolution, a list of matching objects
 will be provided. In order to select an object from this list, provide the
 respective id number or record number as ``id`` and use ``id_type=None``:
 
-.. code-block:: python
+.. doctest-remote-data::
 
    >>> from astroquery.jplhorizons import Horizons
    >>> print(Horizons(id='Encke').ephemerides())
+   Traceback (most recent call last):
    ...
    ValueError: Ambiguous target name; provide unique id:
        Record #  Epoch-yr  Primary Desig  >MATCH NAME<
        --------  --------  -------------  -------------------------
            9134            4822 P-L        Encke
-       90000034    1786    2P              Encke
-       90000035    1796    2P              Encke
-       90000036    1805    2P              Encke
+       90000031    1786    2P              Encke
+       90000032    1796    2P              Encke
+       90000033    1805    2P              Encke
 	    ...     ...    ...               ...
-   >>> print(Horizons(id='90000034', id_type=None).ephemerides())
+   >>> print(Horizons(id='90000034', id_type=None).ephemerides())  # doctest: +IGNORE_OUTPUT
    targetname       datetime_str          datetime_jd    ... RA_3sigma DEC_3sigma
       ---               ---                    d         ...   arcsec    arcsec
    ---------- ------------------------ ----------------- ... --------- ----------
@@ -141,7 +194,7 @@ for a given observer location (``location``) and epoch or range of epochs
 (``epochs``) in the form of an astropy table. The following example queries the
 ephemerides of asteroid (1) Ceres for a range of dates as seen from Mauna Kea:
 
-.. code-block:: python
+.. doctest-remote-data::
 
    >>> from astroquery.jplhorizons import Horizons
    >>> obj = Horizons(id='Ceres', location='568',
@@ -149,23 +202,23 @@ ephemerides of asteroid (1) Ceres for a range of dates as seen from Mauna Kea:
    ...                        'step':'10d'})
    >>> eph = obj.ephemerides()
    >>> print(eph)
-   targetname    datetime_str   datetime_jd ...   GlxLat  RA_3sigma DEC_3sigma
-      ---            ---             d      ...    deg      arcsec    arcsec
-   ---------- ----------------- ----------- ... --------- --------- ----------
-      1 Ceres 2010-Jan-01 00:00   2455197.5 ... 24.120057       0.0        0.0
-      1 Ceres 2010-Jan-11 00:00   2455207.5 ... 20.621496       0.0        0.0
-      1 Ceres 2010-Jan-21 00:00   2455217.5 ... 17.229529       0.0        0.0
-      1 Ceres 2010-Jan-31 00:00   2455227.5 ...  13.97264       0.0        0.0
-      1 Ceres 2010-Feb-10 00:00   2455237.5 ... 10.877201       0.0        0.0
-      1 Ceres 2010-Feb-20 00:00   2455247.5 ...  7.976737       0.0        0.0
+        targetname       datetime_str   datetime_jd ... alpha_true  PABLon  PABLat
+           ---               ---             d      ...    deg       deg     deg
+    ----------------- ----------------- ----------- ... ---------- -------- ------
+    1 Ceres (A801 AA) 2010-Jan-01 00:00   2455197.5 ...    12.3609 238.2494 4.5532
+    1 Ceres (A801 AA) 2010-Jan-11 00:00   2455207.5 ...    14.1057 241.3339 4.2832
+    1 Ceres (A801 AA) 2010-Jan-21 00:00   2455217.5 ...    15.7313 244.3394 4.0089
+    1 Ceres (A801 AA) 2010-Jan-31 00:00   2455227.5 ...    17.2067 247.2518 3.7289
+    1 Ceres (A801 AA) 2010-Feb-10 00:00   2455237.5 ...    18.5029 250.0576 3.4415
+    1 Ceres (A801 AA) 2010-Feb-20 00:00   2455247.5 ...    19.5814 252.7383 3.1451
 
 
 The following fields are available for each ephemerides query:
 
 .. code-block:: python
 
-   >>> print(eph.columns)
-   <TableColumns names=('targetname','datetime_str','datetime_jd','H','G','solar_presence','flags','RA','DEC','RA_app','DEC_app','RA_rate','DEC_rate','AZ','EL','AZ_rate','EL_rate','sat_X','sat_Y','sat_PANG','siderealtime','airmass','magextinct','V','surfbright','illumination','illum_defect','sat_sep','sat_vis','ang_width','PDObsLon','PDObsLat','PDSunLon','PDSunLat','SubSol_ang','SubSol_dist','NPole_ang','NPole_dist','EclLon','EclLat','r','r_rate','delta','delta_rate','lighttime','vel_sun','vel_obs','elong','elongFlag','alpha','lunar_elong','lunar_illum','sat_alpha','sunTargetPA','velocityPA','OrbPlaneAng','constellation','TDB-UT','ObsEclLon','ObsEclLat','NPole_RA','NPole_DEC','GlxLon','GlxLat','solartime','earth_lighttime','RA_3sigma','DEC_3sigma','SMAA_3sigma','SMIA_3sigma','Theta_3sigma','Area_3sigma','RSS_3sigma','r_3sigma','r_rate_3sigma','SBand_3sigma','XBand_3sigma','DoppDelay_3sigma','true_anom','hour_angle','alpha_true','PABLon','PABLat')>
+   >>> print(eph.columns)  # doctest: +REMOTE_DATA
+   <TableColumns names=('targetname','datetime_str','datetime_jd','H','G','solar_presence','lunar_presence','RA','DEC','RA_app','DEC_app','RA_rate','DEC_rate','AZ','EL','AZ_rate','EL_rate','sat_X','sat_Y','sat_PANG','siderealtime','airmass','magextinct','V','surfbright','illumination','illum_defect','sat_sep','sat_vis','ang_width','PDObsLon','PDObsLat','PDSunLon','PDSunLat','SubSol_ang','SubSol_dist','NPole_ang','NPole_dist','EclLon','EclLat','r','r_rate','delta','delta_rate','lighttime','vel_sun','vel_obs','elong','elongFlag','alpha','lunar_elong','lunar_illum','sat_alpha','sunTargetPA','velocityPA','OrbPlaneAng','constellation','TDB-UT','ObsEclLon','ObsEclLat','NPole_RA','NPole_DEC','GlxLon','GlxLat','solartime','earth_lighttime','RA_3sigma','DEC_3sigma','SMAA_3sigma','SMIA_3sigma','Theta_3sigma','Area_3sigma','RSS_3sigma','r_3sigma','r_rate_3sigma','SBand_3sigma','XBand_3sigma','DoppDelay_3sigma','true_anom','hour_angle','alpha_true','PABLon','PABLat')>
 
 The values in these columns are the same as those defined in the Horizons
 `Definition of Observer Table Quantities`_; names have been simplified in a few
@@ -188,11 +241,11 @@ limits fragment matching (73P-B would only match 73P-B), respectively.  Note
 that these options should only be used for comets and will crash the query for
 other object types. Extra precision in the queried properties can be requested
 using the ``extra_precision`` option.  Furthermore, ``get_query_payload=True``
-skips the query and only returns the query payload, whereas
-``get_raw_response=True`` returns the raw query response instead of the astropy
-table.
+skips the query and only returns the query payload. To pass additional settings
+to the request use the ``optional_settings`` passing a key-value
+dictionary.
 
-:meth:`~astroquery.jplhorizons.HorizonsClass.ephemerides` queries by default all
+:meth:`~astroquery.jplhorizons.HorizonsClass.ephemerides` queries by default most
 available quantities from the JPL Horizons servers. This might take a while. If
 you are only interested in a subset of the available quantities, you can query
 only those. The corresponding optional parameter to be set is ``quantities``.
@@ -214,24 +267,24 @@ Horizons) and for a given epoch or a range of epochs (``epochs``) in the form of
 an astropy table. The following example queries the osculating elements of
 asteroid (433) Eros for a given date relative to the Sun:
 
-.. code-block:: python
+.. doctest-remote-data::
 
    >>> from astroquery.jplhorizons import Horizons
    >>> obj = Horizons(id='433', location='500@10',
    ...                epochs=2458133.33546)
    >>> el = obj.elements()
    >>> print(el)
-       targetname      datetime_jd  ...       Q            P
-          ---               d       ...       AU           d
-   ------------------ ------------- ... ------------- ------------
-   433 Eros (A898 PA) 2458133.33546 ... 1.78244263804 642.93873484
+       targetname      datetime_jd  ...        Q                P
+          ---               d       ...        AU               d
+   ------------------ ------------- ... ---------------- ----------------
+   433 Eros (A898 PA) 2458133.33546 ... 1.78244269692907 642.938735130819
 
 
 The following fields are queried:
 
 .. code-block:: python
 
-   >>> print(el.columns)
+   >>> print(el.columns)  # doctest: +REMOTE_DATA
    <TableColumns names=('targetname','datetime_jd','datetime_str','H','G','e','q','incl','Omega','w','Tp_jd','n','M','nu','a','Q','P')>
 
 Optional parameters of :meth:`~astroquery.jplhorizons.HorizonsClass.elements`
@@ -242,9 +295,8 @@ absolute representation of the time of perihelion passage.  For comets, the
 options ``closest_apparition`` and ``no_fragments`` are available, which select
 the closest apparition in time and reject fragments, respectively. Note that
 these options should only be used for comets and will crash the query for other
-object types. Also available are ``get_query_payload=True``, which skips the
-query and only returns the query payload, and ``get_raw_response=True``, which
-returns the raw query response instead of the astropy table.
+object types. Also available is ``get_query_payload=True``, which skips the
+query and only returns the query payload.
 
 Vectors
 -------
@@ -257,44 +309,39 @@ the form of an astropy table. The following example queries the state
 vector of asteroid 2012 TC4 as seen from Goldstone for a range of
 epochs:
 
-.. code-block:: python
+.. doctest-remote-data::
 
    >>> from astroquery.jplhorizons import Horizons
    >>> obj = Horizons(id='2012 TC4', location='257',
    ...                epochs={'start':'2017-10-01', 'stop':'2017-10-02',
    ...                        'step':'10m'})
    >>> vec = obj.vectors()
-   >>> print(vec)
-   targetname  datetime_jd  ...      range          range_rate
-       ---           d       ...        AU             AU / d
-   ---------- ------------- ... --------------- -----------------
-   (2012 TC4)     2458027.5 ... 0.0429332099306 -0.00408018711862
-   (2012 TC4) 2458027.50694 ... 0.0429048742906 -0.00408040726527
-   (2012 TC4) 2458027.51389 ... 0.0428765385796 -0.00408020747595
-   (2012 TC4) 2458027.52083 ... 0.0428482057142  -0.0040795878561
-   (2012 TC4) 2458027.52778 ...  0.042819878607 -0.00407854931543
-   (2012 TC4) 2458027.53472 ... 0.0427915601617  -0.0040770935665
-          ...           ... ...             ...               ...
-   (2012 TC4) 2458028.45833 ... 0.0392489462501 -0.00405496595173
-   (2012 TC4) 2458028.46528 ...   0.03922077771 -0.00405750632914
-   (2012 TC4) 2458028.47222 ...  0.039192592935 -0.00405964084539
-   (2012 TC4) 2458028.47917 ...  0.039164394759 -0.00406136516755
-   (2012 TC4) 2458028.48611 ... 0.0391361860433 -0.00406267574646
-   (2012 TC4) 2458028.49306 ... 0.0391079696711  -0.0040635698239
-   (2012 TC4)     2458028.5 ... 0.0390797485422 -0.00406404543822
+   >>> print(vec)  # doctest: +IGNORE_OUTPUT
+   targetname    datetime_jd    ...        range              range_rate
+      ---             d         ...          AU                 AU / d
+   ---------- ----------------- ... ------------------- ---------------------
+   (2012 TC4)         2458027.5 ... 0.04293321034545636 -0.004080187115743425
+   (2012 TC4) 2458027.506944444 ... 0.04290487470540343 -0.004080407262389858
+   (2012 TC4) 2458027.513888889 ... 0.04287653899449449 -0.004080207473059529
+          ...               ... ...                 ...                   ...
+   (2012 TC4) 2458028.486111111 ... 0.03913618646225701 -0.004062675741730004
+   (2012 TC4) 2458028.493055556 ...  0.0391079700901548 -0.004063569819149637
+   (2012 TC4)         2458028.5 ... 0.03907974896127458 -0.004064045433438098
    Length = 145 rows
+
 
 The following fields are queried:
 
-   >>> print(vec.columns)
+.. code-block:: python
+
+   >>> print(vec.columns)  # doctest: +REMOTE_DATA
    <TableColumns names=('targetname','datetime_jd','datetime_str','H','G','x','y','z','vx','vy','vz','lighttime','range','range_rate')>
 
 
 Similar to the other :class:`~astroquery.jplhorizons.HorizonsClass` functions,
-optional parameters of :meth:`~astroquery.jplhorizons.HorizonsClass.vectors` are
+optional parameters of :meth:`~astroquery.jplhorizons.HorizonsClass.vectors` is
 ``get_query_payload=True``, which skips the query and only returns the query
-payload, and ``get_raw_response=True``, which returns the raw query response
-instead of the astropy table. For comets, the options ``closest_apparation`` and
+payload. For comets, the options ``closest_apparation`` and
 ``no_fragments`` are available, which select the closest apparition in time and
 reject fragments, respectively. Note that these options should only be used for
 comets and will crash the query for other object types. Options ``aberrations``
@@ -306,7 +353,7 @@ respectively.
 How to Use the Query Tables
 ===========================
 
-`astropy table`_ objects created by the query functions are extremely versatile
+`~astropy.table.Table` objects created by the query functions are extremely versatile
 and easy to use. Since all query functions return the same type of table, they
 can all be used in the same way.
 
@@ -314,7 +361,7 @@ We provide some examples to illustrate how to use them based on the following
 JPL Horizons ephemerides query of near-Earth asteroid (3552) Don Quixote since
 its year of Discovery:
 
-.. code-block:: python
+.. doctest-remote-data::
 
    >>> from astroquery.jplhorizons import Horizons
    >>> obj = Horizons(id='3552', location='568',
@@ -322,12 +369,13 @@ its year of Discovery:
    ...                        'step':'1y'})
    >>> eph = obj.ephemerides()
 
+
 As we have seen before, we can display a truncated version of table
 ``eph`` by simply using
 
 .. code-block:: python
 
-   >>> print(eph)
+   >>> print(eph)  # doctest: +REMOTE_DATA
            targetname            datetime_str   ...  PABLon   PABLat
               ---                    ---        ...   deg      deg
    -------------------------- ----------------- ... -------- --------
@@ -345,7 +393,7 @@ As we have seen before, we can display a truncated version of table
 
 Please note the formatting of this table, which is done automatically. Above the
 dashes in the first two lines, you have the column name and its unit. Every
-column is assigned a unit from `astropy units`_. We will learn later how to use
+column is assigned a unit from `astropy.units`. We will learn later how to use
 these units.
 
 
@@ -356,16 +404,17 @@ We can get at list of all the columns in this table with:
 
 .. code-block:: python
 
-   >>> print(eph.columns)
-   <TableColumns names=('targetname','datetime_str','datetime_jd','H','G','solar_presence','flags','RA','DEC','RA_app','DEC_app','RA_rate','DEC_rate','AZ','EL','AZ_rate','EL_rate','sat_X','sat_Y','sat_PANG','siderealtime','airmass','magextinct','V','surfbright','illumination','illum_defect','sat_sep','sat_vis','ang_width','PDObsLon','PDObsLat','PDSunLon','PDSunLat','SubSol_ang','SubSol_dist','NPole_ang','NPole_dist','EclLon','EclLat','r','r_rate','delta','delta_rate','lighttime','vel_sun','vel_obs','elong','elongFlag','alpha','lunar_elong','lunar_illum','sat_alpha','sunTargetPA','velocityPA','OrbPlaneAng','constellation','TDB-UT','ObsEclLon','ObsEclLat','NPole_RA','NPole_DEC','GlxLon','GlxLat','solartime','earth_lighttime','RA_3sigma','DEC_3sigma','SMAA_3sigma','SMIA_3sigma','Theta_3sigma','Area_3sigma','RSS_3sigma','r_3sigma','r_rate_3sigma','SBand_3sigma','XBand_3sigma','DoppDelay_3sigma','true_anom','hour_angle','alpha_true','PABLon','PABLat')>
+   >>> print(eph.columns)     # doctest: +REMOTE_DATA
+   <TableColumns names=('targetname','datetime_str','datetime_jd','H','G','solar_presence','lunar_presence','RA','DEC','RA_app','DEC_app','RA_rate','DEC_rate','AZ','EL','AZ_rate','EL_rate','sat_X','sat_Y','sat_PANG','siderealtime','airmass','magextinct','V','surfbright','illumination','illum_defect','sat_sep','sat_vis','ang_width','PDObsLon','PDObsLat','PDSunLon','PDSunLat','SubSol_ang','SubSol_dist','NPole_ang','NPole_dist','EclLon','EclLat','r','r_rate','delta','delta_rate','lighttime','vel_sun','vel_obs','elong','elongFlag','alpha','lunar_elong','lunar_illum','sat_alpha','sunTargetPA','velocityPA','OrbPlaneAng','constellation','TDB-UT','ObsEclLon','ObsEclLat','NPole_RA','NPole_DEC','GlxLon','GlxLat','solartime','earth_lighttime','RA_3sigma','DEC_3sigma','SMAA_3sigma','SMIA_3sigma','Theta_3sigma','Area_3sigma','RSS_3sigma','r_3sigma','r_rate_3sigma','SBand_3sigma','XBand_3sigma','DoppDelay_3sigma','true_anom','hour_angle','alpha_true','PABLon','PABLat')>
+
 
 We can address each column individually by indexing it using its name as
 provided in this list. For instance, we can get all RAs for Don Quixote by using
 
 .. code-block:: python
 
-   >>> print(eph['RA'])
-       RA
+   >>> print(eph['RA'])     # doctest: +REMOTE_DATA
+      RA
       deg
    ---------
    345.50204
@@ -385,7 +434,7 @@ We can select several columns at a time, for instance RA and DEC for each epoch
 
 .. code-block:: python
 
-   >>> print(eph['datetime_str', 'RA', 'DEC'])
+   >>> print(eph['datetime_str', 'RA', 'DEC'])    # doctest: +REMOTE_DATA
       datetime_str       RA      DEC
           ---           deg      deg
    ----------------- --------- --------
@@ -405,13 +454,14 @@ We can use the same representation to do math with these columns. For instance,
 let's calculate the total rate of the object by summing 'RA_rate' and 'DEC_rate'
 in quadrature:
 
-.. code-block:: python
+
+.. doctest-remote-data::
 
    >>> import numpy as np
    >>> print(np.sqrt(eph['RA_rate']**2 + eph['DEC_rate']**2))
         dRA*cosD
    ------------------
-    86.18728612153883
+    86.18728068796985
    26.337249029653798
    21.520859656742434
    17.679843758686584
@@ -436,7 +486,7 @@ h`` - arcseconds per hour:
 
 .. code-block:: python
 
-   >>> print(eph['RA_rate'])
+   >>> print(eph['RA_rate'])  # doctest: +REMOTE_DATA
     RA_rate
    arcsec / h
    ----------
@@ -455,7 +505,7 @@ h`` - arcseconds per hour:
 The unit of this column can be easily converted to any other unit describing the
 same dimensions. For instance, we can turn ``RA_rate`` into ``arcsec / s``:
 
-.. code-block:: python
+.. doctest-remote-data::
 
    >>> eph['RA_rate'].convert_unit_to('arcsec/s')
    >>> print(eph['RA_rate'])
@@ -474,7 +524,7 @@ same dimensions. For instance, we can turn ``RA_rate`` into ``arcsec / s``:
      0.005284855555555556
 
 
-Please refer to the `astropy table`_ and `astropy units`_ documentations for
+Please refer to the `astropy.table` and `astropy.units` documentations for
 more information.
 
 Hints and Tricks
@@ -493,8 +543,9 @@ Horizons server can be obtained from the
 :class:`~astroquery.jplhorizons.HorizonsClass` object after a query has been
 performed (before the query only ``None`` would be returned):
 
-   >>> print(obj.uri)
+   >>> print(obj.uri)  # doctest: +REMOTE_DATA
    https://ssd.jpl.nasa.gov/api/horizons.api?format=text&EPHEM_TYPE=OBSERVER&QUANTITIES=%271%2C2%2C3%2C4%2C5%2C6%2C7%2C8%2C9%2C10%2C11%2C12%2C13%2C14%2C15%2C16%2C17%2C18%2C19%2C20%2C21%2C22%2C23%2C24%2C25%2C26%2C27%2C28%2C29%2C30%2C31%2C32%2C33%2C34%2C35%2C36%2C37%2C38%2C39%2C40%2C41%2C42%2C43%27&COMMAND=%223552%22&SOLAR_ELONG=%220%2C180%22&LHA_CUTOFF=0&CSV_FORMAT=YES&CAL_FORMAT=BOTH&ANG_FORMAT=DEG&APPARENT=AIRLESS&REF_SYSTEM=ICRF&EXTRA_PREC=NO&CENTER=%27568%27&START_TIME=%222010-01-01%22&STOP_TIME=%222019-12-31%22&STEP_SIZE=%221y%22&SKIP_DAYLT=NO
+
 
 If your query failed, it might be useful for you to put the URI into a web
 browser to get more information why it failed. Please note that ``uri`` is an
@@ -558,7 +609,7 @@ astropy's `~astropy.coordinates`:
 For example, get the barycentric coordinates of Jupiter as an astropy
 `~astropy.coordinates.SkyCoord` object:
 
-.. code-block:: python
+.. doctest-remote-data::
 
    >>> from astropy.coordinates import SkyCoord
    >>> from astropy.time import Time
@@ -575,15 +626,27 @@ For example, get the barycentric coordinates of Jupiter as an astropy
 
 
 
-
 Acknowledgements
 ================
 
-This submodule makes use of the `JPL Horizons
-<https://ssd.jpl.nasa.gov/horizons/>`_ system.
+This submodule makes use of the `JPL Horizons <https://ssd.jpl.nasa.gov/horizons/>`_ system.
 
 The development of this submodule is in part funded through NASA PDART Grant No.
-80NSSC18K0987 to the `sbpy project <http://sbpy.org>`_.
+80NSSC18K0987 to the `sbpy project <https://sbpy.org>`_.
+
+
+Troubleshooting
+===============
+
+If you are repeatedly getting failed queries, or bad/out-of-date results, try clearing your cache:
+
+.. code-block:: python
+
+    >>> from astroquery.jplhorizons import Horizons
+    >>> Horizons.clear_cache()
+
+If this function is unavailable, upgrade your version of astroquery.
+The ``clear_cache`` function was introduced in version 0.4.7.dev8479.
 
 
 Reference/API
@@ -592,9 +655,8 @@ Reference/API
 .. automodapi:: astroquery.jplhorizons
     :no-inheritance-diagram:
 
-.. _Solar System Dynamics group at the Jet Propulation Laboratory: http://ssd.jpl.nasa.gov/
-.. _MPC Observatory codes: http://minorplanetcenter.net/iau/lists/ObsCodesF.html
-.. _astropy table: http://docs.astropy.org/en/stable/table/index.html
-.. _astropy units: http://docs.astropy.org/en/stable/units/index.html
+.. _Solar System Dynamics group at the Jet Propulation Laboratory: https://ssd.jpl.nasa.gov/
+.. _MPC Observatory codes: https://minorplanetcenter.net/iau/lists/ObsCodesF.html
 .. _Definition of Observer Table Quantities: https://ssd.jpl.nasa.gov/horizons/manual.html#observer-table
 .. _Horizons documentation: https://ssd.jpl.nasa.gov/horizons/manual.html#observer-table
+.. _this section of the Horizons manual: <https://ssd.jpl.nasa.gov/horizons/manual.html#center>

@@ -1,42 +1,41 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from ... import splatalogue
 from astropy import units as u
 import numpy as np
 import pytest
-from .test_splatalogue import patch_post
+
+from ... import splatalogue
 from .. import utils
 
 
 def test_clean(patch_post):
-    x = splatalogue.Splatalogue.query_lines(114 * u.GHz, 116 * u.GHz,
+    x = splatalogue.Splatalogue.query_lines(min_frequency=114 * u.GHz,
+                                            max_frequency=116 * u.GHz,
                                             chemical_name=' CO ')
     c = utils.clean_column_headings(x)
     assert 'Resolved QNs' not in c.colnames
-    assert 'QNs' in c.colnames
-
-
-def test_merge(patch_post):
-    x = splatalogue.Splatalogue.query_lines(114 * u.GHz, 116 * u.GHz,
-                                            chemical_name=' CO ')
-    c = utils.merge_frequencies(x)
-    assert 'Freq' in c.colnames
-    assert np.all(c['Freq'] > 0)
+    assert 'resolved_QNs' in c.colnames
 
 
 def test_minimize(patch_post):
-    x = splatalogue.Splatalogue.query_lines(114 * u.GHz, 116 * u.GHz,
+    x = splatalogue.Splatalogue.query_lines(min_frequency=114 * u.GHz,
+                                            max_frequency=116 * u.GHz,
                                             chemical_name=' CO ')
     c = utils.minimize_table(x)
 
     assert 'Freq' in c.colnames
     assert np.all(c['Freq'] > 0)
     assert 'Resolved QNs' not in c.colnames
-    assert 'QNs' in c.colnames
+    assert 'resolved_QNs' in c.colnames
 
 
 @pytest.mark.remote_data
 def test_minimize_issue2135():
-    rslt = splatalogue.Splatalogue.query_lines(100*u.GHz, 200*u.GHz,
+    """
+    This was a regression test for 2135, but is now just a basic test for the
+    new (March 2024) keywords
+    """
+    rslt = splatalogue.Splatalogue.query_lines(min_frequency=100*u.GHz,
+                                               max_frequency=200*u.GHz,
                                                chemical_name=' SiO ',
                                                energy_max=1840,
                                                energy_type='eu_k',
@@ -45,5 +44,4 @@ def test_minimize_issue2135():
 
     minimized = utils.minimize_table(rslt)
 
-    theomask = rslt['Freq-GHz(rest frame,redshifted)'].mask
-    np.testing.assert_allclose(minimized['Freq'][theomask], rslt['Meas Freq-GHz(rest frame,redshifted)'][theomask])
+    np.testing.assert_allclose(minimized['Freq'], rslt['orderedfreq'])

@@ -1,21 +1,29 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-import tempfile
-import shutil
-import numpy as np
-import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 import os
+from io import StringIO
+from pathlib import Path
 from urllib.parse import urlparse
 import re
 from unittest.mock import Mock, MagicMock, patch
 
 from astropy import coordinates
 from astropy import units as u
+import numpy as np
+import pytest
 
-from astroquery.utils.commons import ASTROPY_LT_4_1
-from .. import Alma
+from pyvo.dal.exceptions import DALOverflowWarning
 
-# ALMA tests involving staging take too long, leading to travis timeouts
+from astroquery.exceptions import CorruptDataWarning
+from astroquery.alma import Alma, get_enhanced_table
+
+try:
+    import regions
+
+    HAS_REGIONS = True
+except ImportError:
+    HAS_REGIONS = False
+
 # TODO: make this a configuration item
 SKIP_SLOW = True
 
@@ -26,6 +34,8 @@ all_colnames = {'Project code', 'Source name', 'RA', 'Dec', 'Band',
                 'Asdm uid', 'Project title', 'Project type', 'Scan intent',
                 'Spatial resolution', 'Largest angular scale',
                 'QA2 Status', 'Group ous id', 'Pub'}
+
+download_hostname = 'almascience.eso.org'
 
 
 @pytest.fixture
@@ -38,48 +48,50 @@ def alma(request):
     """
     alma = Alma()
     alma_site = request.config.getoption('--alma-site',
-                                         'almascience.org')
+                                         'almascience.eso.org')
     alma.archive_url = 'https://{}'.format(alma_site)
     return alma
 
 
 @pytest.mark.remote_data
 class TestAlma:
-    @pytest.fixture()
-    def temp_dir(self, request):
-        my_temp_dir = tempfile.mkdtemp()
-
-        def fin():
-            shutil.rmtree(my_temp_dir)
-        request.addfinalizer(fin)
-        return my_temp_dir
-
     def test_public(self, alma):
-        results = alma.query(payload=None, public=True, maxrec=100)
+        with pytest.warns(expected_warning=DALOverflowWarning,
+                          match="Partial result set. Potential causes MAXREC, async storage space, etc."):
+            results = alma.query(payload=None, public=True, maxrec=100)
         assert len(results) == 100
         for row in results:
             assert row['data_rights'] == 'Public'
-        results = alma.query(payload=None, public=False, maxrec=100)
+        with pytest.warns(expected_warning=DALOverflowWarning,
+                          match="Partial result set. Potential causes MAXREC, async storage space, etc."):
+            results = alma.query(payload=None, public=False, maxrec=100)
         assert len(results) == 100
         for row in results:
             assert row['data_rights'] == 'Proprietary'
 
-    def test_SgrAstar(self, temp_dir, alma):
-        alma.cache_location = temp_dir
+    @pytest.mark.skipif(not HAS_REGIONS, reason="regions is required")
+    @pytest.mark.filterwarnings(
+        "ignore::astropy.utils.exceptions.AstropyUserWarning")
+    def test_s_region(self, alma):
+        alma.help_tap()
+        result = alma.query_tap("select top 3 s_region from ivoa.obscore")
+        enhanced_result = get_enhanced_table(result)
+        for row in enhanced_result:
+            assert isinstance(row['s_region'], (regions.CircleSkyRegion,
+                                                regions.PolygonSkyRegion,
+                                                regions.CompoundSkyRegion))
 
-        result_s = alma.query_object('Sgr A*', legacy_columns=True)
+    @pytest.mark.skipif(not HAS_REGIONS, reason="regions is required")
+    @pytest.mark.filterwarnings(
+        "ignore::astropy.utils.exceptions.AstropyUserWarning")
+    def test_SgrAstar(self, tmp_path, alma):
+        alma.cache_location = tmp_path
+
+        result_s = alma.query_object('Sgr A*', legacy_columns=True, enhanced_results=True)
 
         assert '2013.1.00857.S' in result_s['Project code']
-        # "The Brick", g0.253, is in this one
-        # assert b'2011.0.00217.S' in result_c['Project code'] # missing cycle 1 data
 
-    def test_docs_example(self, temp_dir, alma):
-        alma.cache_location = temp_dir
-
-        rslt = alma.query(payload=dict(obs_creator_name='*Ginsburg*'))
-
-        assert 'ADS/JAO.ALMA#2013.1.00269.S' in rslt['obs_publisher_did']
-
+    @pytest.mark.skipif("SKIP_SLOW")
     def test_freq(self, alma):
         payload = {'frequency': '85..86'}
         result = alma.query(payload)
@@ -87,15 +99,15 @@ class TestAlma:
         for row in result:
             # returned em_min and em_max are in m
             assert row['frequency'] >= 85
-            assert row['frequency'] <= 100
+            assert row['frequency'] <= 86
             assert '3' in row['band_list']
 
-    @pytest.mark.skipif("SKIP_SLOW",
-                        reason="Extremely slow due to limitations of "
-                               "the implementation")
     def test_bands(self, alma):
         payload = {'band_list': ['5', '7']}
-        result = alma.query(payload)
+        # Added maxrec here as downloading and reading the results take too long.
+        with pytest.warns(expected_warning=DALOverflowWarning,
+                          match="Partial result set. Potential causes MAXREC, async storage space, etc."):
+            result = alma.query(payload, maxrec=1000)
         assert len(result) > 0
         for row in result:
             assert ('5' in row['band_list']) or ('7' in row['band_list'])
@@ -121,133 +133,54 @@ class TestAlma:
         for row in result:
             assert 'GRB021004' == row['target_name']
 
-    @pytest.mark.skipif("SKIP_SLOW", reason="Known issue")
     def test_ra_dec(self, alma):
         payload = {'ra_dec': '181.0192d -0.01928d'}
         result = alma.query(payload)
         assert len(result) > 0
 
     @pytest.mark.skipif("SKIP_SLOW")
-    def test_m83(self, temp_dir, alma):
-        alma.cache_location = temp_dir
+    def test_m83(self, tmp_path, alma):
+        # Runs for over 9 minutes
+        alma.cache_location = tmp_path
 
         m83_data = alma.query_object('M83', science=True, legacy_columns=True)
         uids = np.unique(m83_data['Member ous id'])
-        link_list = alma.stage_data(uids)
+        link_list = alma.get_data_info(uids)
 
         # On Feb 8, 2016 there were 83 hits.  This number should never go down.
         # Except it has.  On May 18, 2016, there were 47.
         assert len(link_list) >= 47
 
-        # test re-staging
-        # (has been replaced with warning)
-        # with pytest.raises(requests.HTTPError) as ex:
-        #    link_list = alma.stage_data(uids)
-        # assert ex.value.args[0] == ('Received an error 405: this may indicate you have '
-        #                            'already staged the data.  Try downloading the '
-        #                            'file URLs directly with download_files.')
-
-        # log.warning doesn't actually make a warning
-        # link_list = alma.stage_data(uids)
-        # w = recwarn.pop()
-        # assert (str(w.message) == ('Error 405 received.  If you have previously staged the '
-        #                           'same UIDs, the result returned is probably correct,'
-        #                           ' otherwise you may need to create a fresh astroquery.Alma instance.'))
-
-    @pytest.mark.skipif("SKIP_SLOW", reason="Known issue")
-    def test_stage_data(self, temp_dir, alma):
-        alma.cache_location = temp_dir
-
-        result_s = alma.query_object('Sgr A*', legacy_columns=True)
-
-        if ASTROPY_LT_4_1:
-            assert b'2013.1.00857.S' in result_s['Project code']
-            assert b'uid://A002/X40d164/X1b3' in result_s['Asdm uid']
-            assert b'uid://A002/X391d0b/X23d' in result_s['Member ous id']
-            match_val = b'uid://A002/X40d164/X1b3'
-        else:
-            assert '2013.1.00857.S' in result_s['Project code']
-            assert 'uid://A002/X40d164/X1b3' in result_s['Asdm uid']
-            assert 'uid://A002/X391d0b/X23d' in result_s['Member ous id']
-            match_val = 'uid://A002/X40d164/X1b3'
-
-        match = result_s['Asdm uid'] == match_val
-        uid = result_s['Member ous id'][match]
-        # this is temporary to switch back to ALMA servers
-        # del alma.dataarchive_url
-        # alma.archive_url = 'http://almascience.org'
-        result = alma.stage_data(uid)
-
-        found = False
-        for url in result['URL']:
-            if 'uid___A002_X40d164_X1b3' in url:
-                found = True
-                break
-        assert found, 'URL to uid___A002_X40d164_X1b3 expected'
-
-    def test_stage_data_listall(self, temp_dir, alma):
-        """
-        test for expanded capability created in #1683
-        """
-        alma.cache_location = temp_dir
-
-        uid = 'uid://A001/X12a3/Xe9'
-        result1 = alma.stage_data(uid, expand_tarfiles=False)
-        result2 = alma.stage_data(uid, expand_tarfiles=True)
-
-        expected_names = [
-            '2017.1.01185.S_uid___A002_Xd28a9e_X71b8.asdm.sdm.tar',
-            '2017.1.01185.S_uid___A002_Xd28a9e_X7b4d.asdm.sdm.tar',
-            '2017.1.01185.S_uid___A002_Xd29c1f_X1f74.asdm.sdm.tar',
-            '2017.1.01185.S_uid___A002_Xd29c1f_X5cf.asdm.sdm.tar']
-        expected_names_with_aux = expected_names + \
-            ['2017.1.01185.S_uid___A001_X12a3_Xe9_auxiliary.tar']
-        for name in expected_names_with_aux:
-            assert name in result1['name']
-        for res in result1:
-            p = re.compile(r'.*(uid__.*)\.asdm.*')
-            if res['name'] in expected_names:
-                assert 'application/x-tar' == res['type']
-                assert res['id'] == p.search(res['name']).group(1)
-            else:
-                assert res['type'] in ['application/x-tar', 'application/x-votable+xml;content=datalink', 'text/plain']
-                assert res['id'] == 'None'
-            assert 'UNKNOWN' == res['permission']
-            assert res['mous_uid'] == uid
-        assert len(result2) > len(result1)
-
-    def test_stage_data_json(self, temp_dir, alma):
-        """
-        test for json returns
-        """
-        alma.cache_location = temp_dir
-
-        uid = 'uid://A001/X12a3/Xe9'
-        # this is temporary to switch back to ALMA servers
-        # alma.archive_url = 'http://almascience.org'
-        result = alma.stage_data(uid, return_json=False)
-        assert len(result) > 0
-        with pytest.raises(AttributeError):
-            # this no longer works
-            alma.stage_data(uid, return_json=True)
-
     def test_data_proprietary(self, alma):
         # public
         assert not alma.is_proprietary('uid://A001/X12a3/Xe9')
         IVOA_DATE_FORMAT = "%Y-%m-%dT%H:%M:%S.%f"
-        now = datetime.utcnow().strftime(IVOA_DATE_FORMAT)[:-3]
-        query = "select top 1 obs_id from ivoa.obscore where " \
+        now = datetime.now(timezone.utc).strftime(IVOA_DATE_FORMAT)[:-3]
+        query = "select top 1 member_ous_uid from ivoa.obscore where " \
                 "obs_release_date > '{}'".format(now)
         result = alma.query_tap(query)
-        assert len(result.table) == 1
+        assert len(result.to_table()) == 1
         # proprietary
-        assert alma.is_proprietary(result.table[0][0])
+        assert alma.is_proprietary(result.to_table()[0][0])
         # non existent
         with pytest.raises(AttributeError):
             alma.is_proprietary('uid://NON/EXI/STING')
 
-    def test_data_info(self, temp_dir, alma):
-        alma.cache_location = temp_dir
+    @pytest.mark.bigdata
+    def test_retrieve_data(self, tmp_path, alma):
+        """
+        Regression test for issue 2490 (the retrieval step will simply fail if
+        given a blank line, so all we're doing is testing that it runs)
+        """
+        alma.cache_location = tmp_path
+
+        # small solar TP-only data set (<1 GB)
+        uid = 'uid://A001/X87c/X572'
+
+        alma.retrieve_data_from_uid([uid])
+
+    def test_data_info(self, tmp_path, alma):
+        alma.cache_location = tmp_path
 
         uid = 'uid://A001/X12a3/Xe9'
         data_info = alma.get_data_info(uid, expand_tarfiles=True)
@@ -261,6 +194,8 @@ class TestAlma:
 
         # compare with tarball version
         data_info_tar = alma.get_data_info(uid, expand_tarfiles=False)
+
+        # The expanded table should be much longer than the non-expanded table.
         assert len(data_info) > len(data_info_tar)
         # size is the same - not working because service inconsistencies
         # assert sum(data_info['content_length']) == \
@@ -272,21 +207,21 @@ class TestAlma:
                 file_url = url
                 break
         assert file_url
-        alma.download_files([file_url], temp_dir)
-        assert os.stat(os.path.join(temp_dir, file)).st_size
+        alma.download_files([file_url], savedir=tmp_path)
+        assert Path(tmp_path, file).stat().st_size
 
         # mock downloading an entire program
         download_files_mock = Mock()
         alma.download_files = download_files_mock
         alma.retrieve_data_from_uid([uid])
+        trimmed_access_url_list = [e for e in data_info_tar['access_url'].data if len(e) > 0]
+        trimmed_access_urls = (trimmed_access_url_list,)
+        mock_calls = download_files_mock.mock_calls[0][1]
+        assert mock_calls == trimmed_access_urls
 
-        comparison = download_files_mock.mock_calls[0][1] == data_info_tar[
-            'access_url']
-        assert comparison.all()
-
-    def test_download_data(self, temp_dir, alma):
+    def test_download_data(self, tmp_path, alma):
         # test only fits files from a program
-        alma.cache_location = temp_dir
+        alma.cache_location = tmp_path
 
         uid = 'uid://A001/X12a3/Xe9'
         data_info = alma.get_data_info(uid, expand_tarfiles=True)
@@ -298,12 +233,13 @@ class TestAlma:
         alma._download_file = download_mock
         urls = [x['access_url'] for x in data_info
                 if fitsre.match(x['access_url'])]
-        results = alma.download_files(urls, temp_dir)
+        results = alma.download_files(urls, savedir=tmp_path)
         alma._download_file.call_count == len(results)
         assert len(results) == len(urls)
 
-    def test_download_and_extract(self, temp_dir, alma):
-        alma.cache_location = temp_dir
+    @pytest.mark.skipif("SKIP_SLOW")
+    def test_download_and_extract(self, tmp_path, alma):
+        alma.cache_location = tmp_path
         alma._cycle0_tarfile_content_table = {'ID': ''}
 
         uid = 'uid://A001/X12a3/Xe9'
@@ -343,11 +279,10 @@ class TestAlma:
                     [asdm_url], include_asdm=True, regex=r'.*\.py')
         delete_mock.assert_called_once_with(
             'cache_path/' + asdm_url.split('/')[-1])
-        assert downloaded_asdm == [os.path.join(temp_dir, 'foo.py')]
+        assert Path(*downloaded_asdm) == Path(tmp_path, 'foo.py')
 
-    @pytest.mark.skipif("SKIP_SLOW", reason="Known issue")
-    def test_doc_example(self, temp_dir, alma):
-        alma.cache_location = temp_dir
+    def test_doc_example(self, tmp_path, alma):
+        alma.cache_location = tmp_path
         m83_data = alma.query_object('M83', legacy_columns=True)
         # the order can apparently sometimes change
         # These column names change too often to keep testing.
@@ -357,32 +292,29 @@ class TestAlma:
         gc_data = alma.query_region(galactic_center, 1 * u.deg)
         # assert len(gc_data) >= 425 # Feb 8, 2016
         assert len(gc_data) >= 50  # Nov 16, 2016
+        content_length_column_name = 'content_length'
 
         uids = np.unique(m83_data['Member ous id'])
-        if ASTROPY_LT_4_1:
-            assert b'uid://A001/X11f/X30' in uids
-            X30 = (m83_data['Member ous id'] == b'uid://A001/X11f/X30')
-            X31 = (m83_data['Member ous id'] == b'uid://A002/X3216af/X31')
-        else:
-            assert 'uid://A001/X11f/X30' in uids
-            X30 = (m83_data['Member ous id'] == 'uid://A001/X11f/X30')
-            X31 = (m83_data['Member ous id'] == 'uid://A002/X3216af/X31')
+
+        assert 'uid://A001/X11f/X30' in uids
+        X30 = (m83_data['Member ous id'] == 'uid://A001/X11f/X30')
+        X31 = (m83_data['Member ous id'] == 'uid://A002/X3216af/X31')
 
         assert X30.sum() == 4  # Jul 13, 2020
         assert X31.sum() == 4  # Jul 13, 2020
-        mous1 = alma.stage_data('uid://A001/X11f/X30')
-        totalsize_mous1 = mous1['size'].sum() * u.Unit(mous1['size'].unit)
+        mous1 = alma.get_data_info('uid://A001/X11f/X30')
+        totalsize_mous1 = mous1[content_length_column_name].sum() * u.Unit(mous1[content_length_column_name].unit)
         assert (totalsize_mous1.to(u.B) > 1.9*u.GB)
 
-        mous = alma.stage_data('uid://A002/X3216af/X31')
-        totalsize_mous = mous['size'].sum() * u.Unit(mous['size'].unit)
+        mous = alma.get_data_info('uid://A002/X3216af/X31')
+        totalsize_mous = mous[content_length_column_name].sum() * u.Unit(mous[content_length_column_name].unit)
         # More recent ALMA request responses do not include any information
         # about file size, so we have to allow for the possibility that all
         # file sizes are replaced with -1
         assert (totalsize_mous.to(u.GB).value > 52)
 
-    def test_query(self, temp_dir, alma):
-        alma.cache_location = temp_dir
+    def test_query(self, tmp_path, alma):
+        alma.cache_location = tmp_path
 
         result = alma.query(payload={'start_date': '<11-11-2011'},
                             public=False, legacy_columns=True, science=True)
@@ -402,7 +334,6 @@ class TestAlma:
         #                     science=True)
         # assert len(result) == 1
 
-    @pytest.mark.skipif("SKIP_SLOW", reason="ra dec search known issue")
     def test_misc(self, alma):
         # miscellaneous set of common tests
         #
@@ -411,14 +342,18 @@ class TestAlma:
 
         result = alma.query_object('M83', public=True, science=True)
         assert len(result) > 0
-        result = alma.query(payload={'pi_name': '*Bally*'}, public=False,
-                            maxrec=10)
+        with pytest.warns(expected_warning=DALOverflowWarning,
+                          match="Partial result set. Potential causes MAXREC, async storage space, etc."):
+            result = alma.query(payload={'pi_name': 'Bally*'}, public=True,
+                                maxrec=10)
         assert result
-        result.write('/tmp/alma-onerow.txt', format='ascii')
+        # Add overwrite=True in case the test previously died unexpectedly
+        # and left the temp file.
+        result.write('/tmp/alma-onerow.txt', format='ascii', overwrite=True)
         for row in result:
-            assert 'Bally' in row['obs_creator_name']
+            assert 'Bally' in row['pi_name']
         result = alma.query(payload=dict(project_code='2016.1.00165.S'),
-                            public=False, cache=False)
+                            public=True)
         assert result
         for row in result:
             assert '2016.1.00165.S' == row['proposal_id']
@@ -437,8 +372,7 @@ class TestAlma:
 
         result = alma.query_region(
             coordinates.SkyCoord('5:35:14.461 -5:21:54.41', frame='fk5',
-                                 unit=(u.hour, u.deg)), radius=0.034 * u.deg,
-            payload={'energy.frequency-asu': '215 .. 220'})
+                                 unit=(u.hour, u.deg)), radius=0.034 * u.deg)
 
         result = alma.query(payload=dict(project_code='2012.*',
                                          public_data=True))
@@ -463,9 +397,9 @@ class TestAlma:
         assert result
         for row in result:
             assert '6' == row['band_list']
-            assert 'ginsburg' in row['obs_creator_name'].lower()
+            assert 'ginsburg' in row['pi_name'].lower()
 
-    @pytest.mark.skipif("SKIP_SLOW")
+    @pytest.mark.skip("Not sure what this is supposed to do")
     def test_user(self, alma):
         # miscellaneous set of tests from current users
         rslt = alma.query({'band_list': [6], 'project_code': '2012.1.*'},
@@ -478,10 +412,9 @@ class TestAlma:
     # This has been reported, as it is definitely a bug.
     @pytest.mark.xfail
     @pytest.mark.bigdata
-    @pytest.mark.skipif("SKIP_SLOW")
-    def test_cycle1(self, temp_dir, alma):
+    def test_cycle1(self, tmp_path, alma):
         # About 500 MB
-        alma.cache_location = temp_dir
+        alma.cache_location = tmp_path
         target = 'NGC4945'
         project_code = '2012.1.00912.S'
         payload = {'project_code': project_code,
@@ -491,9 +424,9 @@ class TestAlma:
 
         # Need new Alma() instances each time
         a1 = alma()
-        uid_url_table_mous = a1.stage_data(result['Member ous id'])
+        uid_url_table_mous = a1.get_data_info(result['Member ous id'])
         a2 = alma()
-        uid_url_table_asdm = a2.stage_data(result['Asdm uid'])
+        uid_url_table_asdm = a2.get_data_info(result['Asdm uid'])
         # I believe the fixes as part of #495 have resulted in removal of a
         # redundancy in the table creation, so a 1-row table is OK here.
         # A 2-row table may not be OK any more, but that's what it used to
@@ -525,10 +458,10 @@ class TestAlma:
         assert len(data) == 6
 
     @pytest.mark.skipif("SKIP_SLOW")
-    @pytest.mark.skip("Not working anymore")
-    def test_cycle0(self, temp_dir, alma):
+    @pytest.mark.xfail(reason="Not working anymore")
+    def test_cycle0(self, tmp_path, alma):
         # About 20 MB
-        alma.cache_location = temp_dir
+        alma.cache_location = tmp_path
 
         target = 'NGC4945'
         project_code = '2011.0.00121.S'
@@ -540,8 +473,8 @@ class TestAlma:
 
         alma1 = alma()
         alma2 = alma()
-        uid_url_table_mous = alma1.stage_data(result['Member ous id'])
-        uid_url_table_asdm = alma2.stage_data(result['Asdm uid'])
+        uid_url_table_mous = alma1.get_data_info(result['Member ous id'])
+        uid_url_table_asdm = alma2.get_data_info(result['Asdm uid'])
         assert len(uid_url_table_asdm) == 1
         assert len(uid_url_table_mous) == 32
 
@@ -561,7 +494,7 @@ class TestAlma:
         # There are 10 small files, but only 8 unique
         assert len(data) == 8
 
-    def test_keywords(self, temp_dir, alma):
+    def test_keywords(self, tmp_path, alma):
 
         alma.help_tap()
         result = alma.query_tap(
@@ -604,32 +537,9 @@ def test_project_metadata(alma):
 
 
 @pytest.mark.remote_data
-@pytest.mark.skip('Not working for now - Investigating')
-def test_staging_postfeb2020(alma):
-
-    tbl = alma.stage_data('uid://A001/X121/X4ba')
-
-    assert 'mous_uid' in tbl.colnames
-
-    assert '2013.1.00269.S_uid___A002_X9de499_X3d6c.asdm.sdm.tar' in tbl['name']
-
-
-@pytest.mark.remote_data
-@pytest.mark.skip('Not working for now - Investigating')
-def test_staging_uptofeb2020(alma):
-    tbl = alma.stage_data('uid://A001/X121/X4ba')
-
-    assert 'mous_uid' in tbl.colnames
-
-    names = [x.split("/")[-1] for x in tbl['URL']]
-
-    assert '2013.1.00269.S_uid___A002_X9de499_X3d6c.asdm.sdm.tar' in names
-
-
-@pytest.mark.remote_data
-def test_staging_stacking(alma):
-    alma.stage_data(['uid://A001/X13d5/X1d', 'uid://A002/X3216af/X31',
-                     'uid://A001/X12a3/X240'])
+def test_data_info_stacking(alma):
+    alma.get_data_info(['uid://A001/X13d5/X1d', 'uid://A002/X3216af/X31',
+                        'uid://A001/X12a3/X240'])
 
 
 @pytest.mark.remote_data
@@ -652,6 +562,83 @@ def test_big_download_regression(alma):
 
 
 @pytest.mark.remote_data
-def test_download_html_file():
-    result = alma.download_files(['https://almascience.nao.ac.jp/dataPortal/member.uid___A001_X1284_X1353.qa2_report.html'])
+def test_tap_upload():
+    tmp_table = StringIO('''<?xml version="1.0" encoding="UTF-8"?>
+    <VOTABLE xmlns="http://www.ivoa.net/xml/VOTable/v1.3"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="1.3">
+      <RESOURCE>
+        <TABLE>
+          <FIELD name="prop_id" datatype="char" arraysize="*">
+            <DESCRIPTION>external URI for the physical artifact</DESCRIPTION>
+          </FIELD>
+          <DATA>
+            <TABLEDATA>
+              <TR>
+                <TD>2013.1.01365.S</TD>
+              </TR>
+            </TABLEDATA>
+          </DATA>
+        </TABLE>
+      </RESOURCE>
+    </VOTABLE>''')
+
+    alma = Alma()
+    res = alma.query_tap(
+        'select top 3 proposal_id from ivoa.ObsCore oc join TAP_UPLOAD.proj_codes pc on oc.proposal_id=pc.prop_id',
+        uploads={'proj_codes': tmp_table})
+    assert len(res) == 3
+    for row in res:
+        assert row['proposal_id'] == '2013.1.01365.S'
+
+
+@pytest.mark.remote_data
+def test_download_html_file(alma, tmp_path):
+    alma.cache_location = tmp_path
+    result = alma.download_files(
+        ['https://{}/dataPortal/member.uid___A001_X1284_X1353.qa2_report.html'.format(download_hostname)])
     assert result
+
+
+@pytest.mark.remote_data
+def test_verify_html_file(alma, caplog, tmp_path):
+    alma.cache_location = tmp_path
+
+    # download the file
+    result = alma.download_files(
+        ['https://{}/dataPortal/member.uid___A001_X1284_X1353.qa2_report.html'.format(download_hostname)])
+    assert 'member.uid___A001_X1284_X1353.qa2_report.html' in result[0]
+
+    result = alma.download_files(
+        ['https://{}/dataPortal/member.uid___A001_X1284_X1353.qa2_report.html'.format(download_hostname)],
+        verify_only=True)
+    assert 'member.uid___A001_X1284_X1353.qa2_report.html' in result[0]
+    local_filepath = Path(result[0])
+    expected_file_length = local_filepath.stat().st_size
+    assert f"Found cached file {local_filepath} with expected size {expected_file_length}." in caplog.text
+
+    # manipulate the file
+    with open(local_filepath, 'ab') as fh:
+        fh.write(b"Extra Text")
+
+    caplog.clear()
+    new_file_length = expected_file_length + 10
+    with pytest.warns(expected_warning=CorruptDataWarning,
+                      match=(f"Found cached file {local_filepath} with size {new_file_length} > expected size "
+                             f"{expected_file_length}.  The download is likely corrupted.")):
+        result = alma.download_files(
+            ['https://{}/dataPortal/member.uid___A001_X1284_X1353.qa2_report.html'.format(download_hostname)],
+            verify_only=True)
+    assert 'member.uid___A001_X1284_X1353.qa2_report.html' in result[0]
+
+    # manipulate the file: make it small
+    with open(local_filepath, 'wb') as fh:
+        fh.write(b"Empty Text")
+
+    caplog.clear()
+    result = alma.download_files(
+        ['https://{}/dataPortal/member.uid___A001_X1284_X1353.qa2_report.html'.format(download_hostname)],
+        verify_only=True)
+    assert 'member.uid___A001_X1284_X1353.qa2_report.html' in result[0]
+    existing_file_length = 10
+    assert (f"Found cached file {local_filepath} with size {existing_file_length} < expected size "
+            f"{expected_file_length}.  The download should be continued.") in caplog.text

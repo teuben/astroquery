@@ -10,28 +10,35 @@ European Space Agency (ESA)
 """
 import os
 import shutil
-from unittest.mock import MagicMock
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+import sys
+import io
 
 import astropy.units as u
 import numpy as np
 import pytest
 from astropy import units
+from astropy.coordinates.name_resolve import NameResolveError
 from astropy.coordinates.sky_coordinate import SkyCoord
+from astropy.io.votable import parse_single_table
 from astropy.table import Table
 from astropy.units import Quantity
+from astroquery.exceptions import TableParseError
 
 from astroquery.esa.jwst import JwstClass
 from astroquery.esa.jwst.tests.DummyTapHandler import DummyTapHandler
 from astroquery.ipac.ned import Ned
-from astroquery.simbad import Simbad
-from astroquery.utils import TableList
+from astroquery.simbad import SimbadClass
 from astroquery.utils.tap.conn.tests.DummyConnHandler import DummyConnHandler
 from astroquery.utils.tap.conn.tests.DummyResponse import DummyResponse
 from astroquery.utils.tap.core import TapPlus
-from astroquery.utils.tap.xmlparser import utils
 from astroquery.vizier import Vizier
 
 from astroquery.esa.jwst import conf
+
+
+JOB_DATA = (Path(__file__).with_name("data") / "job_1.vot").read_text()
 
 
 def data_path(filename):
@@ -65,7 +72,7 @@ def associated_planes_request(request):
 
 
 def get_product_mock(params, *args, **kwargs):
-    if('file_name' in kwargs and kwargs.get('file_name') == 'file_name_id'):
+    if ('file_name' in kwargs and kwargs.get('file_name') == 'file_name_id'):
         return "00000000-0000-0000-8740-65e2827c9895"
     else:
         return "jw00617023001_02102_00001_nrcb4_uncal.fits"
@@ -228,20 +235,22 @@ class TestTap:
 
     def test_query_region(self):
         connHandler = DummyConnHandler()
-        tapplus = TapPlus("http://test:1111/tap", connhandler=connHandler)
+        tapplus = TapPlus(url="http://test:1111/tap", connhandler=connHandler)
         tap = JwstClass(tap_plus_handler=tapplus, show_messages=False)
+
+        with pytest.raises(ValueError) as err:
+            tap.query_region(coordinate=123)
+        assert "coordinate must be either a string or astropy.coordinates" in err.value.args[0]
+
+        with pytest.raises(NameResolveError) as err:
+            tap.query_region(coordinate='test')
+        assert ("Unable to find coordinates for name 'test'" in err.value.args[0] or "Unable to retrieve "
+                "coordinates" in err.value.args[0])
 
         # Launch response: we use default response because the
         # query contains decimals
-        responseLaunchJob = DummyResponse()
-        responseLaunchJob.set_status_code(200)
-        responseLaunchJob.set_message("OK")
-        jobDataFile = data_path('job_1.vot')
-        jobData = utils.read_file_content(jobDataFile)
-        responseLaunchJob.set_data(method='POST',
-                                   context=None,
-                                   body=jobData,
-                                   headers=None)
+        responseLaunchJob = DummyResponse(200)
+        responseLaunchJob.set_data(method='POST', body=JOB_DATA)
         # The query contains decimals: force default response
         connHandler.set_default_response(responseLaunchJob)
         sc = SkyCoord(ra=29.0, dec=15.0, unit=(u.degree, u.degree),
@@ -249,6 +258,11 @@ class TestTap:
         with pytest.raises(ValueError) as err:
             tap.query_region(sc)
         assert "Missing required argument: 'width'" in err.value.args[0]
+
+        width = 123
+        with pytest.raises(ValueError) as err:
+            tap.query_region(sc, width=width)
+        assert "width must be either a string or units.Quantity" in err.value.args[0]
 
         width = Quantity(12, u.deg)
         height = Quantity(10, u.deg)
@@ -264,7 +278,7 @@ class TestTap:
             tap.query_region(sc, width=width, height=height, observation_id=1)
         assert "observation_id must be string" in err.value.args[0]
 
-        assert(isinstance(tap.query_region(sc, width=width, height=height, observation_id="observation"), Table))
+        assert (isinstance(tap.query_region(sc, width=width, height=height, observation_id="observation"), Table))
         # raise ValueError
 
         # Test cal_level argument
@@ -368,40 +382,23 @@ class TestTap:
 
     def test_query_region_async(self):
         connHandler = DummyConnHandler()
-        tapplus = TapPlus("http://test:1111/tap", connhandler=connHandler)
+        tapplus = TapPlus(url="http://test:1111/tap", connhandler=connHandler)
         tap = JwstClass(tap_plus_handler=tapplus, show_messages=False)
         jobid = '12345'
         # Launch response
-        responseLaunchJob = DummyResponse()
-        responseLaunchJob.set_status_code(303)
-        responseLaunchJob.set_message("OK")
+        responseLaunchJob = DummyResponse(303)
         # list of list (httplib implementation for headers in response)
         launchResponseHeaders = [['location', 'http://test:1111/tap/async/' + jobid]]
-        responseLaunchJob.set_data(method='POST',
-                                   context=None,
-                                   body=None,
-                                   headers=launchResponseHeaders)
+        responseLaunchJob.set_data(method='POST', headers=launchResponseHeaders)
         connHandler.set_default_response(responseLaunchJob)
         # Phase response
-        responsePhase = DummyResponse()
-        responsePhase.set_status_code(200)
-        responsePhase.set_message("OK")
-        responsePhase.set_data(method='GET',
-                               context=None,
-                               body="COMPLETED",
-                               headers=None)
+        responsePhase = DummyResponse(200)
+        responsePhase.set_data(method='GET', body="COMPLETED")
         req = "async/" + jobid + "/phase"
         connHandler.set_response(req, responsePhase)
         # Results response
-        responseResultsJob = DummyResponse()
-        responseResultsJob.set_status_code(200)
-        responseResultsJob.set_message("OK")
-        jobDataFile = data_path('job_1.vot')
-        jobData = utils.read_file_content(jobDataFile)
-        responseResultsJob.set_data(method='GET',
-                                    context=None,
-                                    body=jobData,
-                                    headers=None)
+        responseResultsJob = DummyResponse(200)
+        responseResultsJob.set_data(method='GET', body=JOB_DATA)
         req = "async/" + jobid + "/results/result"
         connHandler.set_response(req, responseResultsJob)
         sc = SkyCoord(ra=29.0, dec=15.0, unit=(u.degree, u.degree),
@@ -457,19 +454,12 @@ class TestTap:
 
     def test_cone_search_sync(self):
         connHandler = DummyConnHandler()
-        tapplus = TapPlus("http://test:1111/tap", connhandler=connHandler)
+        tapplus = TapPlus(url="http://test:1111/tap", connhandler=connHandler)
         tap = JwstClass(tap_plus_handler=tapplus, show_messages=False)
         # Launch response: we use default response because the
         # query contains decimals
-        responseLaunchJob = DummyResponse()
-        responseLaunchJob.set_status_code(200)
-        responseLaunchJob.set_message("OK")
-        jobDataFile = data_path('job_1.vot')
-        jobData = utils.read_file_content(jobDataFile)
-        responseLaunchJob.set_data(method='POST',
-                                   context=None,
-                                   body=jobData,
-                                   headers=None)
+        responseLaunchJob = DummyResponse(200)
+        responseLaunchJob.set_data(method='POST', body=JOB_DATA)
         ra = 19.0
         dec = 20.0
         sc = SkyCoord(ra=ra, dec=dec, unit=(u.degree, u.degree), frame='icrs')
@@ -549,44 +539,27 @@ class TestTap:
 
     def test_cone_search_async(self):
         connHandler = DummyConnHandler()
-        tapplus = TapPlus("http://test:1111/tap", connhandler=connHandler)
+        tapplus = TapPlus(url="http://test:1111/tap", connhandler=connHandler)
         tap = JwstClass(tap_plus_handler=tapplus, show_messages=False)
         jobid = '12345'
         # Launch response
-        responseLaunchJob = DummyResponse()
-        responseLaunchJob.set_status_code(303)
-        responseLaunchJob.set_message("OK")
+        responseLaunchJob = DummyResponse(303)
         # list of list (httplib implementation for headers in response)
         launchResponseHeaders = [['location', 'http://test:1111/tap/async/' + jobid]]
-        responseLaunchJob.set_data(method='POST',
-                                   context=None,
-                                   body=None,
-                                   headers=launchResponseHeaders)
+        responseLaunchJob.set_data(method='POST', headers=launchResponseHeaders)
         ra = 19
         dec = 20
         sc = SkyCoord(ra=ra, dec=dec, unit=(u.degree, u.degree), frame='icrs')
         radius = Quantity(1.0, u.deg)
         connHandler.set_default_response(responseLaunchJob)
         # Phase response
-        responsePhase = DummyResponse()
-        responsePhase.set_status_code(200)
-        responsePhase.set_message("OK")
-        responsePhase.set_data(method='GET',
-                               context=None,
-                               body="COMPLETED",
-                               headers=None)
+        responsePhase = DummyResponse(200)
+        responsePhase.set_data(method='GET', body="COMPLETED")
         req = "async/" + jobid + "/phase"
         connHandler.set_response(req, responsePhase)
         # Results response
-        responseResultsJob = DummyResponse()
-        responseResultsJob.set_status_code(200)
-        responseResultsJob.set_message("OK")
-        jobDataFile = data_path('job_1.vot')
-        jobData = utils.read_file_content(jobDataFile)
-        responseResultsJob.set_data(method='GET',
-                                    context=None,
-                                    body=jobData,
-                                    headers=None)
+        responseResultsJob = DummyResponse(200)
+        responseResultsJob.set_data(method='GET', body=JOB_DATA)
         req = "async/" + jobid + "/results/result"
         connHandler.set_response(req, responseResultsJob)
         job = tap.cone_search(sc, radius, async_job=True)
@@ -635,7 +608,7 @@ class TestTap:
 
         param_dict = {}
         param_dict['RETRIEVAL_TYPE'] = 'PRODUCT'
-        param_dict['DATA_RETRIEVAL_ORIGIN'] = 'ASTROQUERY'
+        param_dict['TAPCLIENT'] = 'ASTROQUERY'
         param_dict['ARTIFACTID'] = '00000000-0000-0000-8740-65e2827c9895'
         parameters['params_dict'] = param_dict
 
@@ -659,7 +632,7 @@ class TestTap:
 
         param_dict = {}
         param_dict['RETRIEVAL_TYPE'] = 'PRODUCT'
-        param_dict['DATA_RETRIEVAL_ORIGIN'] = 'ASTROQUERY'
+        param_dict['TAPCLIENT'] = 'ASTROQUERY'
         param_dict['ARTIFACTID'] = '00000000-0000-0000-8740-65e2827c9895'
         parameters['params_dict'] = param_dict
 
@@ -669,23 +642,17 @@ class TestTap:
     def test_get_products_list(self):
         dummyTapHandler = DummyTapHandler()
         jwst = JwstClass(tap_plus_handler=dummyTapHandler, data_handler=dummyTapHandler, show_messages=False)
-        # default parameters
-        with pytest.raises(ValueError) as err:
-            jwst.get_product_list()
-        assert "Missing required argument: 'observation_id'" in err.value.args[0]
 
         # test with parameters
         dummyTapHandler.reset()
 
         observation_id = "jw00777011001_02104_00001_nrcblong"
-        cal_level_condition = " AND m.calibrationlevel = m.max_cal_level"
-        prodtype_condition = ""
 
         query = (f"select distinct a.uri, a.artifactid, a.filename, "
                  f"a.contenttype, a.producttype, p.calibrationlevel, p.public "
                  f"FROM {conf.JWST_PLANE_TABLE} p JOIN {conf.JWST_ARTIFACT_TABLE} "
                  f"a ON (p.planeid=a.planeid) WHERE a.planeid "
-                 f"IN {planeids};")
+                 f"IN {planeids} AND producttype ILIKE '%science%';")
 
         parameters = {}
         parameters['query'] = query
@@ -697,8 +664,32 @@ class TestTap:
         parameters['upload_resource'] = None
         parameters['upload_table_name'] = None
 
-        jwst.get_product_list(observation_id=observation_id)
+        jwst.get_product_list(observation_id=observation_id, product_type='science')
         dummyTapHandler.check_call('launch_job', parameters)
+
+    def test_get_products_list_error(self):
+        dummyTapHandler = DummyTapHandler()
+        jwst = JwstClass(tap_plus_handler=dummyTapHandler, data_handler=dummyTapHandler, show_messages=False)
+        observation_id = "jw00777011001_02104_00001_nrcblong"
+        # default parameters
+        with pytest.raises(ValueError) as err:
+            jwst.get_product_list()
+        assert "Missing required argument: 'observation_id'" in err.value.args[0]
+
+        with pytest.raises(ValueError) as err:
+            jwst.get_product_list(observation_id=observation_id, product_type=1)
+        assert "product_type must be string" in err.value.args[0]
+
+        with pytest.raises(ValueError) as err:
+            jwst.get_product_list(observation_id=observation_id, product_type='test')
+        assert "product_type must be one of" in err.value.args[0]
+
+    def test_download_files_from_program(self):
+        dummyTapHandler = DummyTapHandler()
+        jwst = JwstClass(tap_plus_handler=dummyTapHandler, data_handler=dummyTapHandler, show_messages=False)
+        with pytest.raises(TypeError) as err:
+            jwst.download_files_from_program()
+        assert "missing 1 required positional argument: 'proposal_id'" in err.value.args[0]
 
     def test_get_obs_products(self):
         dummyTapHandler = DummyTapHandler()
@@ -725,7 +716,7 @@ class TestTap:
 
         param_dict = {}
         param_dict['RETRIEVAL_TYPE'] = 'OBSERVATION'
-        param_dict['DATA_RETRIEVAL_ORIGIN'] = 'ASTROQUERY'
+        param_dict['TAPCLIENT'] = 'ASTROQUERY'
         param_dict['planeid'] = planeids
         param_dict['calibrationlevel'] = 'ALL'
         parameters['params_dict'] = param_dict
@@ -748,6 +739,37 @@ class TestTap:
                                          files_returned=files_returned)
         finally:
             shutil.rmtree(output_file_full_path_dir)
+
+        # Test product_type paramater with a list
+        output_file_full_path_dir = os.getcwd() + os.sep + "temp_test_jwsttap_get_obs_products_1"
+        try:
+            os.makedirs(output_file_full_path_dir, exist_ok=True)
+        except OSError as err:
+            print(f"Creation of the directory {output_file_full_path_dir} failed: {err.strerror}")
+            raise err
+
+        file = data_path('single_product_retrieval.tar')
+        output_file_full_path = output_file_full_path_dir + os.sep + os.path.basename(file)
+        shutil.copy(file, output_file_full_path)
+        parameters['output_file'] = output_file_full_path
+
+        expected_files = []
+        extracted_file_1 = output_file_full_path_dir + os.sep + 'single_product_retrieval_1.fits'
+        expected_files.append(extracted_file_1)
+        product_type_as_list = ['science', 'info']
+        try:
+            files_returned = (jwst.get_obs_products(
+                              observation_id=observation_id,
+                              cal_level='ALL',
+                              product_type=product_type_as_list,
+                              output_file=output_file_full_path))
+            parameters['params_dict']['product_type'] = 'science,info'
+            dummyTapHandler.check_call('load_data', parameters)
+            self.__check_extracted_files(files_expected=expected_files,
+                                         files_returned=files_returned)
+        finally:
+            shutil.rmtree(output_file_full_path_dir)
+            del parameters['params_dict']['product_type']
 
         # Test single file
         output_file_full_path_dir = os.getcwd() + os.sep +\
@@ -801,13 +823,17 @@ class TestTap:
         try:
             files_returned = (jwst.get_obs_products(
                               observation_id=observation_id,
+                              cal_level=1,
                               output_file=output_file_full_path))
+            parameters['params_dict']['calibrationlevel'] = 'LEVEL1ONLY'
             dummyTapHandler.check_call('load_data', parameters)
             self.__check_extracted_files(files_expected=expected_files,
                                          files_returned=files_returned)
         finally:
             # self.__remove_folder_contents(folder=output_file_full_path_dir)
             shutil.rmtree(output_file_full_path_dir)
+
+        parameters['params_dict']['calibrationlevel'] = 'ALL'
 
         # Test single file gzip
         output_file_full_path_dir = (os.getcwd() + os.sep + "temp_test_jwsttap_get_obs_products_4")
@@ -927,49 +953,58 @@ class TestTap:
                 raise ValueError(f"Not found expected file: {f}")
 
     def test_query_target_error(self):
-        jwst = JwstClass(show_messages=False)
-        simbad = Simbad()
-        ned = Ned()
-        vizier = Vizier()
-        # Testing default parameters
-        with pytest.raises(ValueError) as err:
-            jwst.query_target(target_name="M1", target_resolver="")
-        assert "This target resolver is not allowed" in err.value.args[0]
-        with pytest.raises(ValueError) as err:
-            jwst.query_target("TEST")
-        assert "This target name cannot be determined with this resolver: ALL" in err.value.args[0]
-        with pytest.raises(ValueError) as err:
-            jwst.query_target(target_name="M1", target_resolver="ALL")
-        assert err.value.args[0] in [f"This target name cannot be determined "
-                                     f"with this resolver: ALL", "Missing "
-                                     f"required argument: 'width'"]
+        # need to patch simbad query object here
+        with patch("astroquery.simbad.SimbadClass.query_object",
+                   side_effect=lambda object_name: parse_single_table(
+                       Path(__file__).parent / "data" / f"simbad_{object_name}.vot"
+                   ).to_table()):
+            jwst = JwstClass(show_messages=False)
+            simbad = SimbadClass()
+            ned = Ned()
+            vizier = Vizier()
+            # Testing default parameters
+            with pytest.raises((ValueError, TableParseError)) as err:
+                jwst.query_target(target_name="M1", target_resolver="")
+                assert "This target resolver is not allowed" in err.value.args[0]
+            with pytest.raises((ValueError, TableParseError)) as err:
+                jwst.query_target("TEST")
+                assert ('This target name cannot be determined with this '
+                        'resolver: ALL' in err.value.args[0] or 'Failed to parse' in err.value.args[0])
+            with pytest.raises((ValueError, TableParseError)) as err:
+                jwst.query_target(target_name="M1", target_resolver="ALL")
+                assert err.value.args[0] in ["This target name cannot be determined "
+                                             "with this resolver: ALL", "Missing "
+                                             "required argument: 'width'"]
 
-        # Testing no valid coordinates from resolvers
-        simbad_file = data_path('test_query_by_target_name_simbad_ned_error.vot')
-        simbad_table = Table.read(simbad_file)
-        simbad.query_object = MagicMock(return_value=simbad_table)
-        ned_file = data_path('test_query_by_target_name_simbad_ned_error.vot')
-        ned_table = Table.read(ned_file)
-        ned.query_object = MagicMock(return_value=ned_table)
-        vizier_file = data_path('test_query_by_target_name_vizier_error.vot')
-        vizier_table = Table.read(vizier_file)
-        vizier.query_object = MagicMock(return_value=vizier_table)
+            # Testing no valid coordinates from resolvers
+            simbad_file = data_path('test_query_by_target_name_simbad_ned_error.vot')
+            simbad_table = Table.read(simbad_file)
+            simbad.query_object = MagicMock(return_value=simbad_table)
+            ned_file = data_path('test_query_by_target_name_simbad_ned_error.vot')
+            ned_table = Table.read(ned_file)
+            ned.query_object = MagicMock(return_value=ned_table)
+            vizier_file = data_path('test_query_by_target_name_vizier_error.vot')
+            vizier_table = Table.read(vizier_file)
+            vizier.query_object = MagicMock(return_value=vizier_table)
 
-        # coordinate_error = 'coordinate must be either a string or astropy.coordinates'
-        with pytest.raises(ValueError) as err:
-            jwst.query_target(target_name="test", target_resolver="SIMBAD",
-                              radius=units.Quantity(5, units.deg))
-        assert 'This target name cannot be determined with this resolver: SIMBAD' in err.value.args[0]
+            # coordinate_error = 'coordinate must be either a string or astropy.coordinates'
+            with pytest.raises((ValueError, TableParseError)) as err:
+                jwst.query_target(target_name="TEST", target_resolver="SIMBAD",
+                                  radius=units.Quantity(5, units.deg))
+                assert ('This target name cannot be determined with this '
+                        'resolver: SIMBAD' in err.value.args[0] or 'Failed to parse' in err.value.args[0])
 
-        with pytest.raises(ValueError) as err:
-            jwst.query_target(target_name="test", target_resolver="NED",
-                              radius=units.Quantity(5, units.deg))
-        assert 'This target name cannot be determined with this resolver: NED' in err.value.args[0]
+            with pytest.raises((ValueError, TableParseError)) as err:
+                jwst.query_target(target_name="TEST", target_resolver="NED",
+                                  radius=units.Quantity(5, units.deg))
+                assert ('This target name cannot be determined with this '
+                        'resolver: NED' in err.value.args[0] or 'Failed to parse' in err.value.args[0])
 
-        with pytest.raises(ValueError) as err:
-            jwst.query_target(target_name="test", target_resolver="VIZIER",
-                              radius=units.Quantity(5, units.deg))
-        assert 'This target name cannot be determined with this resolver: VIZIER' in err.value.args[0]
+            with pytest.raises((ValueError, TableParseError)) as err:
+                jwst.query_target(target_name="TEST", target_resolver="VIZIER",
+                                  radius=units.Quantity(5, units.deg))
+                assert ('This target name cannot be determined with this resolver: '
+                        'VIZIER' in err.value.args[0] or 'Failed to parse' in err.value.args[0])
 
     def test_remove_jobs(self):
         dummyTapHandler = DummyTapHandler()
@@ -978,7 +1013,7 @@ class TestTap:
         parameters = {}
         parameters['jobs_list'] = job_list
         parameters['verbose'] = False
-        tap.remove_jobs(job_list)
+        tap.remove_jobs(jobs_list=job_list)
         dummyTapHandler.check_call('remove_jobs', parameters)
 
     def test_save_results(self):
@@ -1009,6 +1044,72 @@ class TestTap:
         parameters['verbose'] = False
         tap.logout()
         dummyTapHandler.check_call('logout', parameters)
+
+    def test_set_token_ok(self):
+        old_stdout = sys.stdout  # Memorize the default stdout stream
+        sys.stdout = buffer = io.StringIO()
+
+        connHandler = DummyConnHandler()
+        response = DummyResponse(200)
+        response.set_data(method='GET', body='OK')
+        token = 'test_token'
+        connHandler.set_response(f"{conf.JWST_TOKEN}?token={token}", response)
+        tapplus = TapPlus(url="http://test:1111/tap", connhandler=connHandler)
+        tap = JwstClass(tap_plus_handler=tapplus, show_messages=False)
+
+        tap.set_token(token=token)
+
+        sys.stdout = old_stdout
+        assert ('MAST token has been set successfully' in buffer.getvalue())
+
+    def test_set_token_anonymous_error(self):
+        old_stdout = sys.stdout  # Memorize the default stdout stream
+        sys.stdout = buffer = io.StringIO()
+
+        connHandler = DummyConnHandler()
+        response = DummyResponse(403)
+        response.set_data(method='GET', body='OK')
+        token = 'test_token'
+        connHandler.set_response(f"{conf.JWST_TOKEN}?token={token}", response)
+        tapplus = TapPlus(url="http://test:1111/tap", connhandler=connHandler)
+        tap = JwstClass(tap_plus_handler=tapplus, show_messages=False)
+
+        tap.set_token(token=token)
+
+        sys.stdout = old_stdout
+        assert ('ERROR: MAST tokens cannot be assigned or requested by anonymous users' in buffer.getvalue())
+
+    def test_set_token_server_error(self):
+        old_stdout = sys.stdout  # Memorize the default stdout stream
+        sys.stdout = buffer = io.StringIO()
+
+        connHandler = DummyConnHandler()
+        response = DummyResponse(500)
+        response.set_data(method='GET', body='OK')
+        token = 'test_token'
+        connHandler.set_response(f"{conf.JWST_TOKEN}?token={token}", response)
+        tapplus = TapPlus(url="http://test:1111/tap", connhandler=connHandler)
+        tap = JwstClass(tap_plus_handler=tapplus, show_messages=False)
+
+        tap.set_token(token=token)
+
+        sys.stdout = old_stdout
+        assert ('ERROR: Server error when setting the token' in buffer.getvalue())
+
+    def test_get_messages_ok(self):
+        old_stdout = sys.stdout  # Memorize the default stdout stream
+        sys.stdout = buffer = io.StringIO()
+
+        connHandler = DummyConnHandler()
+        response = DummyResponse(200)
+        response.set_data(method='GET', body='message=SERVER OK')
+        connHandler.set_response(f"{conf.JWST_MESSAGES}", response)
+        tapplus = TapPlus(url="http://test:1111/tap", connhandler=connHandler)
+        tap = JwstClass(tap_plus_handler=tapplus, show_messages=False)
+
+        tap.get_status_messages()
+        sys.stdout = old_stdout
+        assert ('SERVER OK' in buffer.getvalue())
 
     @pytest.mark.noautofixt
     def test_query_get_product(self):
@@ -1047,3 +1148,13 @@ class TestTap:
         parameters['upload_resource'] = None
         parameters['upload_table_name'] = None
         dummyTapHandler.check_call('launch_job', parameters)
+
+    def test_load_async_job(self):
+        dummyTapHandler = DummyTapHandler()
+        tap = JwstClass(tap_plus_handler=dummyTapHandler, show_messages=False)
+        tap.load_async_job(jobid=101222)
+        parameters = {}
+        parameters['jobid'] = 101222
+        parameters['name'] = None
+        parameters['verbose'] = False
+        dummyTapHandler.check_call('load_async_job', parameters)

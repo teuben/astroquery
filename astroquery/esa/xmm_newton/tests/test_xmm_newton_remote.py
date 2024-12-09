@@ -1,10 +1,12 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """
-@author: Elena Colomo
-@contact: ecolomo@esa.int
+=======================
+XMM-Newton Remote Tests
+=======================
+
 European Space Astronomy Centre (ESAC)
 European Space Agency (ESA)
-Created on 4 Sept. 2019
+
 """
 
 import pytest
@@ -22,7 +24,13 @@ from ..core import XMMNewtonClass
 from ..tests.dummy_tap_handler import DummyXMMNewtonTapHandler
 
 
-class TestXMMNewtonRemote():
+def data_path(filename):
+    data_dir = os.path.join(os.path.dirname(__file__), 'data')
+    return os.path.join(data_dir, filename)
+
+
+@pytest.mark.remote_data
+class TestXMMNewtonRemote:
     _files = {
         "0405320501": {
             "pps": [
@@ -79,15 +87,15 @@ class TestXMMNewtonRemote():
                 "P0405320501PNS001IMAGE_5000.FTZ",
                 "P0405320501PNU001IMAGE_5000.FTZ",
                 "P0405320501PNX001IMAGE_5000.FTZ"
-                ]
-            }
+            ]
+        }
     }
 
     def get_dummy_tap_handler(self):
         parameters = {'query': "select top 10 * from v_public_observations",
-                       'output_file': "test2.vot",
-                       'output_format': "votable",
-                       'verbose': False}
+                      'output_file': "test2.vot",
+                      'output_format': "votable",
+                      'verbose': False}
         dummyTapHandler = DummyXMMNewtonTapHandler("launch_job", parameters)
         return dummyTapHandler
 
@@ -100,7 +108,7 @@ class TestXMMNewtonRemote():
                             os.makedirs(os.path.join(ob_name, ftype))
                         except OSError as exc:
                             if exc.errno == errno.EEXIST and \
-                              os.path.isdir(os.path.join(ob_name, ftype)):
+                                    os.path.isdir(os.path.join(ob_name, ftype)):
                                 pass
                             else:
                                 raise
@@ -111,8 +119,7 @@ class TestXMMNewtonRemote():
                     shutil.rmtree(os.path.join(ob_name, ftype))
                     shutil.rmtree(ob_name)
 
-    @pytest.mark.remote_data
-    def test_download_data(self):
+    def test_download_data(self, tmp_cwd):
         parameters = {'observation_id': "0112880801",
                       'level': "ODF",
                       'filename': 'file',
@@ -120,8 +127,7 @@ class TestXMMNewtonRemote():
         xsa = XMMNewtonClass(self.get_dummy_tap_handler())
         xsa.download_data(**parameters)
 
-    @pytest.mark.remote_data
-    def test_download_data_single_file(self):
+    def test_download_data_single_file(self, tmp_cwd):
         parameters = {'observation_id': "0762470101",
                       'level': "PPS",
                       'name': 'OBSMLI',
@@ -132,8 +138,7 @@ class TestXMMNewtonRemote():
         xsa = XMMNewtonClass(self.get_dummy_tap_handler())
         xsa.download_data(**parameters)
 
-    @pytest.mark.remote_data
-    def test_get_postcard(self):
+    def test_get_postcard(self, tmp_cwd):
         parameters = {'observation_id': "0112880801",
                       'image_type': "OBS_EPIC",
                       'filename': None,
@@ -141,8 +146,7 @@ class TestXMMNewtonRemote():
         xsa = XMMNewtonClass(self.get_dummy_tap_handler())
         xsa.get_postcard(**parameters)
 
-    @pytest.mark.remote_data
-    def test_get_postcard_filename(self):
+    def test_get_postcard_filename(self, tmp_cwd):
         parameters = {'observation_id': "0112880801",
                       'image_type': "OBS_EPIC",
                       'filename': "test",
@@ -150,9 +154,8 @@ class TestXMMNewtonRemote():
         xsa = XMMNewtonClass(self.get_dummy_tap_handler())
         xsa.get_postcard(**parameters)
 
-    @pytest.mark.remote_data
     def test_get_epic_metadata(self):
-        tap_url = "http://nxsadev.esac.esa.int/tap-server/tap/"
+        tap_url = "https://nxsa.esac.esa.int/tap-server/tap/"
         target_name = "4XMM J122934.7+015657"
         radius = 0.01
         epic_source_table = "xsa.v_epic_source"
@@ -165,7 +168,7 @@ class TestXMMNewtonRemote():
         slew_source_column = "slew_source_cat_equatorial_spoint"
         xsa = XMMNewtonClass(TapPlus(url=tap_url))
         epic_source, cat_4xmm, stack_4xmm, slew_source = xsa.get_epic_metadata(target_name=target_name,
-                                                                                radius=radius)
+                                                                               radius=radius)
         c = SkyCoord.from_name(target_name, parse=True)
         query = ("select * from {} "
                  "where 1=contains({}, circle('ICRS', {}, {}, {}));")
@@ -194,12 +197,10 @@ class TestXMMNewtonRemote():
                                                radius))
         assert report_diff_values(slew_source, table)
 
-    @pytest.mark.remote_data
-    @pytest.mark.xfail(raises=LoginError)
-    def test_download_proprietary_data_incorrect_credentials(self):
-        parameters = {'observation_id': "0762470101",
+    def test_download_proprietary_data_incorrect_credentials(self, tmp_cwd):
+        parameters = {'observation_id': "0861270201",
                       'prop': 'True',
-                      'credentials_file': "astroquery/esa/xmm_newton/tests/data/dummy_config.ini",
+                      'credentials_file': data_path("dummy_config.ini"),
                       'level': "PPS",
                       'name': 'OBSMLI',
                       'filename': 'single',
@@ -207,12 +208,11 @@ class TestXMMNewtonRemote():
                       'extension': 'FTZ',
                       'verbose': False}
         xsa = XMMNewtonClass(self.get_dummy_tap_handler())
-        xsa.download_data(**parameters)
+        with pytest.raises(LoginError):
+            xsa.download_data(**parameters)
 
-    @pytest.mark.remote_data
-    @pytest.mark.xfail(raises=LoginError)
-    def test_download_proprietary_data_without_credentials(self):
-        parameters = {'observation_id': "0883780101",
+    def test_download_proprietary_data_without_credentials(self, tmp_cwd):
+        parameters = {'observation_id': "0861270201",
                       'level': "PPS",
                       'name': 'OBSMLI',
                       'filename': 'single',
@@ -220,15 +220,12 @@ class TestXMMNewtonRemote():
                       'extension': 'FTZ',
                       'verbose': False}
         xsa = XMMNewtonClass(self.get_dummy_tap_handler())
-        xsa.download_data(**parameters)
+        with pytest.raises(LoginError):
+            xsa.download_data(**parameters)
 
-    @pytest.mark.remote_data
-    def test_get_epic_spectra(self):
+    def test_get_epic_spectra(self, tmp_cwd):
         _tarname = "tarfile.tar"
         _source_number = 83
-        _instruments = ["M1", "M1_arf", "M1_bkg", "M1_rmf",
-                        "M2", "M2_arf", "M2_bkg", "M2_rmf",
-                        "PN", "PN_arf", "PN_bkg", "PN_rmf"]
         self._create_tar(_tarname, self._files)
         xsa = XMMNewtonClass(self.get_dummy_tap_handler())
         res = xsa.get_epic_spectra(_tarname, _source_number,

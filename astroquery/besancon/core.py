@@ -86,11 +86,11 @@ class BesanconClass(BaseQuery):
     # sample file name:  1340900648.230224.resu
     result_re = re.compile(r"[0-9]{10}\.[0-9]{6}\.resu")
 
-    def __init__(self, email=None):
-        super(BesanconClass, self).__init__()
+    def __init__(self, *, email=None):
+        super().__init__()
         self.email = email
 
-    def get_besancon_model_file(self, filename, verbose=True, timeout=5.0):
+    def get_besancon_model_file(self, filename, *, verbose=True, timeout=5.0):
         """
         Download a Besancon model from the website.
 
@@ -145,7 +145,7 @@ class BesanconClass(BaseQuery):
 
         return parse_besancon_model_string(results)
 
-    def _parse_result(self, response, verbose=False, retrieve_file=True):
+    def _parse_result(self, response, *, verbose=False, retrieve_file=True):
         """
         retrieve_file : bool
             If True, will try to retrieve the file every 30s until it shows up.
@@ -174,7 +174,7 @@ class BesanconClass(BaseQuery):
         else:
             return filename
 
-    def _parse_args(self, glon, glat, email, smallfield=True, extinction=0.7,
+    def _parse_args(self, glon, glat, email, *, smallfield=True, extinction=0.7,
                     area=0.0001, verbose=True, clouds=None,
                     absmag_limits=(-7, 20), mag_limits=copy.copy(mag_limits),
                     colors_limits=copy.copy(colors_limits),
@@ -182,7 +182,7 @@ class BesanconClass(BaseQuery):
         """
         Perform a query on the Besancon model of the galaxy.
 
-        http://model.obs-besancon.fr/
+        https://model.obs-besancon.fr/
 
         Parameters
         ----------
@@ -223,8 +223,8 @@ class BesanconClass(BaseQuery):
         """
         if email is None and hasattr(self, 'email'):
             email = self.email
-        if (email is None or not isinstance(email, str) or
-                not commons.validate_email(email)):
+        if (email is None or not isinstance(email, str)
+                or not commons.validate_email(email)):
             raise ValueError("Must specify a valid e-mail address.")
 
         # create a new keyword dict based on inputs + defaults
@@ -274,8 +274,8 @@ class BesanconClass(BaseQuery):
         # convert all array elements to arrays
         for dummy in range(2):  # deal with nested lists
             for k, v in list(request_data.items()):
-                if (isinstance(v, list) or
-                        (isinstance(v, tuple) and len(v) > 1)):
+                if (isinstance(v, list)
+                        or (isinstance(v, tuple) and len(v) > 1)):
                     if k in request_data:
                         del request_data[k]
                     for index, val in enumerate(v):
@@ -286,8 +286,7 @@ class BesanconClass(BaseQuery):
 
         return request_data
 
-    @prepend_docstr_nosections("\n" + _parse_args.__doc__ +
-                              _parse_result.__doc__)
+    @prepend_docstr_nosections("\n" + _parse_args.__doc__ + _parse_result.__doc__)
     def query_async(self, *args, **kwargs):
         """
         Returns

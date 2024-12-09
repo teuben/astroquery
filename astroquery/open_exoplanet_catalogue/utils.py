@@ -9,7 +9,7 @@ class Number:
     Examples
     --------
 
-    >>> num = Number(10, errorminus=0.5, errorplus=0.8)
+    >>> num = Number(value=10, errorminus=0.5, errorplus=0.8)
     >>> str(num)
     '10.0 +0.8 -0.5'
 
@@ -22,7 +22,7 @@ class Number:
     >>> num.errorminus
     0.5
 
-    >>> num = Number(None, upperlimit=10)
+    >>> num = Number(value=None, upperlimit=10)
     >>> str(num)
     '<10.0'
 
@@ -33,7 +33,7 @@ class Number:
     False
     """
 
-    def __init__(self, value=None, upperlimit=None, lowerlimit=None,
+    def __init__(self, *, value=None, upperlimit=None, lowerlimit=None,
                  errorplus=None, errorminus=None):
         """
         Parameters
@@ -78,11 +78,11 @@ class Number:
         """
         Example outputs
         ---------------
-        >>> str(Number(2.0))
+        >>> str(Number(value=2.0))
         '2.0'
-        >>> str(Number(2.0, errorplus=1.0, errorminus=1.5))
+        >>> str(Number(value=2.0, errorplus=1.0, errorminus=1.5))
         '2.0 +1.0 -1.5'
-        >>> str(Number(2.0, errorplus=1.0, errorminus=1.0))
+        >>> str(Number(value=2.0, errorplus=1.0, errorminus=1.0))
         '2.0 +/-1.0'
         >>> str(Number(lowerlimit=2.0))
         '>2.0'
@@ -98,15 +98,14 @@ class Number:
             if self.errorplus == self.errorminus:
                 tempstr += " +/-" + str(self.errorplus)
             else:
-                tempstr += (" +" + str(self.errorplus) + " -" +
-                            str(self.errorminus))
+                tempstr += (" +" + str(self.errorplus) + " -" + str(self.errorminus))
         if hasattr(self, "upperlimit") and self.upperlimit is not None:
             tempstr += "<" + str(self.upperlimit)
         elif hasattr(self, "lowerlimit") and self.lowerlimit is not None:
             tempstr += ">" + str(self.lowerlimit)
         return tempstr
 
-    def machine_readable(self, separator="\t", missingval="None"):
+    def machine_readable(self, *, separator="\t", missingval="None"):
         """
         Creates a string intended for a machine to read (ex, gnuplot)
         prints as follows
@@ -236,17 +235,11 @@ class Number:
     def __float__(self):
         return float(self.value)
 
-    def __cmp__(self, num):
-        return cmp(self.value, num)
-
     def __and__(self, num):
         return self.value & num
 
     def __abs__(self):
         return abs(self.value)
-
-    def __coerce__(self, num):
-        return coerce(self.value, num)
 
     def __hash__(self):
         return hash(self.value)
@@ -259,9 +252,6 @@ class Number:
 
     def __invert__(self):
         return ~self.value
-
-    def __long__(self):
-        return long(self.value)
 
     def __lshift__(self, num):
         return self.value << num

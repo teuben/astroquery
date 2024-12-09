@@ -6,10 +6,11 @@ from astropy import config as _config
 
 
 # list the URLs here separately so they can be used in tests.
-_url_list = ['http://almascience.org',
+_url_list = ['https://almascience.org',
              'https://almascience.eso.org',
              'https://almascience.nrao.edu',
-             'https://almascience.nao.ac.jp']
+             'https://almascience.nao.ac.jp'
+             ]
 
 auth_urls = ['asa.alma.cl', 'rh-cas.alma.cl']
 
@@ -37,8 +38,8 @@ class Conf(_config.ConfigNamespace):
 
 conf = Conf()
 
-from .core import Alma, AlmaClass, ALMA_BANDS
+from .core import Alma, AlmaClass, ALMA_BANDS, get_enhanced_table
 
 __all__ = ['Alma', 'AlmaClass',
-           'Conf', 'conf', 'ALMA_BANDS'
+           'Conf', 'conf', 'ALMA_BANDS', 'get_enhanced_table'
            ]

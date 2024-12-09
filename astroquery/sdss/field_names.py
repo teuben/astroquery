@@ -1,7 +1,4 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
-
 import json
 import warnings
 
@@ -9,8 +6,8 @@ from astropy.table import Table
 from astropy.utils.data import get_pkg_data_contents
 from astropy.utils.exceptions import AstropyUserWarning
 
-from . import conf
-from ..utils.mocks import MockResponse
+from astroquery.sdss import conf
+from astroquery.utils.mocks import MockResponse
 
 __all__ = ['get_field_info', 'photoobj_defs', 'specobj_defs', 'crossid_defs']
 

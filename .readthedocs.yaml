@@ -1,16 +1,25 @@
 version: 2
 
-python:
-   # Revise build version once more dependencies support python 3.9+
-   version: 3.8
-   system_packages: false
-   install:
-     - method: pip
-       path: .
-       extra_requirements:
-          - docs
-          - all
+build:
+  os: "ubuntu-22.04"
+  tools:
+    python: "3.11"
+  apt_packages:
+    - graphviz
 
 sphinx:
-   fail_on_warning: true
-   configuration: docs/conf.py
+  builder: html
+  configuration: docs/conf.py
+  fail_on_warning: true
+
+# Install regular dependencies.
+# Then, install special pinning for RTD.
+python:
+  install:
+    - method: pip
+      path: .
+      extra_requirements:
+        - docs
+
+# Don't build any extra formats
+formats: []

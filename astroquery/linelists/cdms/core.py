@@ -1,7 +1,7 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 import numpy as np
+import requests
 import os
-import warnings
 
 from bs4 import BeautifulSoup
 import astropy.units as u
@@ -10,9 +10,10 @@ from astroquery.query import BaseQuery
 from astroquery.utils import async_to_sync
 # import configurable items declared in __init__.py
 from astroquery.linelists.cdms import conf
-from astroquery.jplspec import lookup_table
 from astroquery.exceptions import InvalidQueryError, EmptyResponseError
 
+import re
+import string
 
 __all__ = ['CDMS', 'CDMSClass']
 
@@ -52,6 +53,13 @@ class CDMSClass(BaseQuery):
         molecule : list, string of regex if parse_name_locally=True, optional
             Identifiers of the molecules to search for. If this parameter
             is not provided the search will match any species. Default is 'All'.
+            As a first pass, the molecule will be searched for with a direct
+            string match.  If no string match is found, a regular expression
+            match is attempted.  Note that if the molecule name regex contains
+            parentheses, they must be escaped.  For example, 'H2C(CN)2.*' must be
+            specified as 'H2C\\(CN\\)2.*'  (but because of the first-attempt
+            full-string matching, 'H2C(CN)2' will match that molecule
+            successfully).
 
         temperature_for_intensity : float
             The temperature to use when computing the intensity Smu^2.  Set
@@ -74,8 +82,8 @@ class CDMSClass(BaseQuery):
             parameters as a dict. Default value is set to False
 
         cache : bool
-            Cache the request and, for repeat identical requests, reuse the
-            cache?
+            Defaults to True. If set overrides global caching behavior.
+            See :ref:`caching documentation <astroquery_cache>`.
 
         Returns
         -------
@@ -126,12 +134,12 @@ class CDMSClass(BaseQuery):
             if parse_name_locally:
                 self.lookup_ids = build_lookup()
                 luts = self.lookup_ids.find(molecule, flags)
-                payload['Molecules'] = tuple(f"{val:06d} {key}"
-                                             for key, val in luts.items())[0]
-                if len(molecule) == 0:
+                if len(luts) == 0:
                     raise InvalidQueryError('No matching species found. Please '
                                             'refine your search or read the Docs '
                                             'for pointers on how to search.')
+                payload['Molecules'] = tuple(f"{val:06d} {key}"
+                                             for key, val in luts.items())[0]
             else:
                 payload['Molecules'] = molecule
 
@@ -148,7 +156,7 @@ class CDMSClass(BaseQuery):
         soup = BeautifulSoup(response.text, 'html.parser')
 
         ok = False
-        urls = [x.attrs['src'] for x in soup.findAll('frame',)]
+        urls = [x.attrs['src'] for x in soup.find_all('frame',)]
         for url in urls:
             if 'tab' in url and 'head' not in url:
                 ok = True
@@ -164,7 +172,7 @@ class CDMSClass(BaseQuery):
 
         return response2
 
-    def _parse_result(self, response, verbose=False):
+    def _parse_result(self, response, *, verbose=False):
         """
         Parse a response into an `~astropy.table.Table`
 
@@ -187,12 +195,14 @@ class CDMSClass(BaseQuery):
 
         ELO:   Lower state energy in cm^{-1} relative to the ground state.
         GUP:   Upper state degeneracy.
-        TAG:   Species tag or molecular identifier.
-            A negative value flags that the line frequency has
-            been measured in the laboratory.  The absolute value of TAG is then the
-            species tag and ERR is the reported experimental error.  The three most
-            significant digits of the species tag are coded as the mass number of
-            the species.
+        MOLWT: The first half of the molecular weight tag, which is the mass in atomic
+               mass units (Daltons).
+        TAG:   Species tag or molecular identifier.  This only includes the
+               last 3 digits of the CDMS tag
+
+        A negative value of MOLWT flags that the line frequency has been
+        measured in the laboratory.  We record this boolean in the 'Lab'
+        column.  ERR is the reported experimental error.
 
         QNFMT: Identifies the format of the quantum numbers
         Ju/Ku/vu and Jl/Kl/vl are the upper/lower QNs
@@ -214,16 +224,22 @@ class CDMSClass(BaseQuery):
                   'LGINT': 25,
                   'DR': 36,
                   'ELO': 38,
-                  'GUP': 48,
-                  'TAG': 51,
-                  'QNFMT': 57,
+                  'GUP': 47,
+                  'MOLWT': 51,
+                  'TAG': 54,
+                  'QNFMT': 58,
                   'Ju': 61,
                   'Ku': 63,
                   'vu': 65,
-                  'Jl': 67,
-                  'Kl': 69,
-                  'vl': 71,
-                  'F': 73,
+                  'F1u': 67,
+                  'F2u': 69,
+                  'F3u': 71,
+                  'Jl': 73,
+                  'Kl': 75,
+                  'vl': 77,
+                  'F1l': 79,
+                  'F2l': 81,
+                  'F3l': 83,
                   'name': 89}
 
         result = ascii.read(text, header_start=None, data_start=0,
@@ -234,6 +250,21 @@ class CDMSClass(BaseQuery):
 
         result['FREQ'].unit = u.MHz
         result['ERR'].unit = u.MHz
+
+        result['Lab'] = result['MOLWT'] < 0
+        result['MOLWT'] = np.abs(result['MOLWT'])
+        result['MOLWT'].unit = u.Da
+
+        fix_keys = ['GUP']
+        for suf in 'ul':
+            for qn in ('J', 'v', 'K', 'F1', 'F2', 'F3'):
+                qnind = qn+suf
+                fix_keys.append(qnind)
+        for key in fix_keys:
+            if not np.issubdtype(result[key].dtype, np.integer):
+                intcol = np.array(list(map(parse_letternumber, result[key])),
+                                  dtype=int)
+                result[key] = intcol
 
         # if there is a crash at this step, something went wrong with the query
         # and the _last_query_temperature was not set.  This shouldn't ever
@@ -247,7 +278,8 @@ class CDMSClass(BaseQuery):
 
         return result
 
-    def get_species_table(self, catfile='catdir.cat'):
+    def get_species_table(self, *, catfile='catdir.cat', use_cached=True,
+                          catfile_url=conf.catfile_url):
         """
         A directory of the catalog is found in a file called 'catdir.cat.'
 
@@ -269,8 +301,10 @@ class CDMSClass(BaseQuery):
 
         """
 
-        result = ascii.read(data_path('catdir.cat'), format='csv',
-                            delimiter='|')
+        if use_cached:
+            result = ascii.read(data_path(catfile), format='fixed_width', delimiter='|')
+        else:
+            result = retrieve_catfile(catfile_url)
 
         meta = {'lg(Q(1000))': 1000.0,
                 'lg(Q(500))': 500.0,
@@ -303,12 +337,81 @@ class CDMSClass(BaseQuery):
 CDMS = CDMSClass()
 
 
+def parse_letternumber(st):
+    """
+    Parse CDMS's two-letter QNs
+
+    From the CDMS docs:
+    "Exactly two characters are available for each quantum number. Therefore, half
+    integer quanta are rounded up ! In addition, capital letters are used to
+    indicate quantum numbers larger than 99. E. g. A0 is 100, Z9 is 359. Small
+    types are used to signal corresponding negative quantum numbers."
+    """
+    asc = string.ascii_lowercase
+    ASC = string.ascii_uppercase
+    newst = ''.join(['-' + str(asc.index(x)+10) if x in asc else
+                     str(ASC.index(x)+10) if x in ASC else
+                     x for x in st])
+    return int(newst)
+
+
+class Lookuptable(dict):
+
+    def find(self, st, flags):
+        """
+        Search dictionary keys for a regex match to string s
+
+        Parameters
+        ----------
+        s : str
+            String to compile as a regular expression
+            Can be entered non-specific for broader results
+            ('H2O' yields 'H2O' but will also yield 'HCCCH2OD')
+            or as the specific desired regular expression for
+            catered results, for example: ('H2O$' yields only 'H2O')
+
+        flags : int
+            Regular expression flags.
+
+        Returns
+        -------
+        The list of values corresponding to the matches
+
+        """
+
+        out = {}
+
+        for kk, vv in self.items():
+            # note that the string-match attempt here differs from the jplspec
+            # implementation
+            match = (st in kk) or re.search(st, str(kk), flags=flags)
+            if match:
+                out[kk] = vv
+
+        return out
+
+
 def build_lookup():
 
     result = CDMS.get_species_table()
-    keys = list(result[1][:])  # convert NAME column to list
-    values = list(result[0][:])  # convert TAG column to list
+    keys = list(result['molecule'][:])  # convert NAME column to list
+    values = list(result['tag'][:])  # convert TAG column to list
     dictionary = dict(zip(keys, values))  # make k,v dictionary
-    lookuptable = lookup_table.Lookuptable(dictionary)  # apply the class above
+    lookuptable = Lookuptable(dictionary)  # apply the class above
 
     return lookuptable
+
+
+def retrieve_catfile(url='https://cdms.astro.uni-koeln.de/classic/entries/partition_function.html'):
+    """
+    Simple retrieve index function
+    """
+    response = requests.get(url)
+    response.raise_for_status()
+    tbl = ascii.read(response.text, header_start=None, data_start=15, data_end=-5,
+                     names=['tag', 'molecule', '#lines', 'lg(Q(1000))', 'lg(Q(500))', 'lg(Q(300))', 'lg(Q(225))',
+                            'lg(Q(150))', 'lg(Q(75))', 'lg(Q(37.5))', 'lg(Q(18.75))', 'lg(Q(9.375))', 'lg(Q(5.000))',
+                            'lg(Q(2.725))'],
+                     col_starts=(0, 7, 34, 41, 53, 66, 79, 92, 106, 117, 131, 145, 159, 173),
+                     format='fixed_width', delimiter=' ')
+    return tbl

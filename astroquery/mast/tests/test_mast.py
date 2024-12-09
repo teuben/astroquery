@@ -1,5 +1,6 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
+import json
 import os
 import re
 from shutil import copyfile
@@ -12,13 +13,16 @@ from astropy.io import fits
 
 import astropy.units as u
 
+from astroquery.mast.services import _json_to_table
 from astroquery.utils.mocks import MockResponse
-from ...exceptions import InvalidQueryError, InputWarning
+from astroquery.exceptions import InvalidQueryError, InputWarning
 
-from ... import mast
+from astroquery import mast
 
 DATA_FILES = {'Mast.Caom.Cone': 'caom.json',
               'Mast.Name.Lookup': 'resolver.json',
+              'mission_search_results': 'mission_results.json',
+              'mission_columns': 'mission_columns.json',
               'columnsconfig': 'columnsconfig.json',
               'ticcolumns': 'ticcolumns.json',
               'ticcol_filtered': 'ticcolumns_filtered.json',
@@ -43,6 +47,7 @@ DATA_FILES = {'Mast.Caom.Cone': 'caom.json',
               'Mast.HscMatches.Db.v2': 'matchid.json',
               'Mast.HscSpectra.Db.All': 'spectra.json',
               'panstarrs': 'panstarrs.json',
+              'panstarrs_columns': 'panstarrs_columns.json',
               'tess_cutout': 'astrocut_107.27_-70.0_5x5.zip',
               'tess_sector': 'tess_sector.json',
               'z_cutout_fit': 'astrocut_189.49206_62.20615_100x100px_f.zip',
@@ -59,7 +64,7 @@ def data_path(filename):
 def patch_post(request):
     mp = request.getfixturevalue("monkeypatch")
 
-    mp.setattr(mast.utils, '_simple_request', resolver_mockreturn)
+    mp.setattr(mast.utils, '_simple_request', request_mockreturn)
     mp.setattr(mast.discovery_portal.PortalAPI, '_request', post_mockreturn)
     mp.setattr(mast.services.ServiceAPI, '_request', service_mockreturn)
     mp.setattr(mast.auth.MastAuth, 'session_info', session_info_mockreturn)
@@ -96,13 +101,14 @@ def post_mockreturn(self, method="POST", url=None, data=None, timeout=10, **kwar
     if ("Filtered" in service) and (re.search(r"COUNT_BIG%28%2A%29", data)):
         service = "Counts"
     filename = data_path(DATA_FILES[service])
-    content = open(filename, 'rb').read()
+    with open(filename, 'rb') as infile:
+        content = infile.read()
 
     # returning as list because this is what the mast _request function does
     return [MockResponse(content)]
 
 
-def service_mockreturn(self, method="POST", url=None, data=None, timeout=10, **kwargs):
+def service_mockreturn(self, method="POST", url=None, data=None, timeout=10, use_json=False, **kwargs):
     if "panstarrs" in url:
         filename = data_path(DATA_FILES["panstarrs"])
     elif "tesscut" in url:
@@ -115,13 +121,24 @@ def service_mockreturn(self, method="POST", url=None, data=None, timeout=10, **k
             filename = data_path(DATA_FILES['z_survey'])
         else:
             filename = data_path(DATA_FILES['z_cutout_fit'])
-    content = open(filename, 'rb').read()
+    elif use_json and data['radius'] == 300:
+        filename = data_path(DATA_FILES["mission_incorrect_results"])
+    elif use_json:
+        filename = data_path(DATA_FILES["mission_search_results"])
+    with open(filename, 'rb') as infile:
+        content = infile.read()
     return MockResponse(content)
 
 
-def resolver_mockreturn(*args, **kwargs):
-    filename = data_path(DATA_FILES["Mast.Name.Lookup"])
-    content = open(filename, 'rb').read()
+def request_mockreturn(url, params={}):
+    if 'column_list' in url:
+        filename = data_path(DATA_FILES['mission_columns'])
+    elif 'Mast.Name.Lookup' in params:
+        filename = data_path(DATA_FILES["Mast.Name.Lookup"])
+    elif 'panstarrs' in url:
+        filename = data_path(DATA_FILES['panstarrs_columns'])
+    with open(filename, 'rb') as infile:
+        content = infile.read()
     return MockResponse(content)
 
 
@@ -152,7 +169,8 @@ def tesscut_get_mockreturn(method="GET", url=None, data=None, timeout=10, **kwar
     else:
         filename = data_path(DATA_FILES['tess_cutout'])
 
-    content = open(filename, 'rb').read()
+    with open(filename, 'rb') as infile:
+        content = infile.read()
     return MockResponse(content)
 
 
@@ -169,6 +187,59 @@ def zcut_download_mockreturn(url, file_path):
         filename = data_path(DATA_FILES['z_cutout_fit'])
     copyfile(filename, file_path)
     return
+
+
+###########################
+# MissionSearchClass Test #
+###########################
+
+
+def test_missions_query_region_async(patch_post):
+    responses = mast.MastMissions.query_region_async(regionCoords, radius=0.002, sci_pi_last_name='GORDON')
+    assert isinstance(responses, MockResponse)
+
+
+def test_missions_query_object_async(patch_post):
+    responses = mast.MastMissions.query_object_async("M101", radius="0.002 deg")
+    assert isinstance(responses, MockResponse)
+
+
+def test_missions_query_object(patch_post):
+    result = mast.MastMissions.query_object("M101", radius=".002 deg")
+    assert isinstance(result, Table)
+    assert len(result) > 0
+
+
+def test_missions_query_region(patch_post):
+    result = mast.MastMissions.query_region(regionCoords, radius=0.002 * u.deg)
+    assert isinstance(result, Table)
+    assert len(result) > 0
+
+
+def test_missions_query_criteria_async(patch_post):
+    responses = mast.MastMissions.query_criteria_async(
+        coordinates=regionCoords,
+        radius=3,
+        sci_pep_id=12556,
+        sci_obs_type='SPECTRUM',
+        sci_instrume='stis,acs,wfc3,cos,fos,foc,nicmos,ghrs',
+        sci_aec='S'
+    )
+    assert isinstance(responses, MockResponse)
+
+
+def test_missions_query_criteria_async_with_missing_results(patch_post):
+    with pytest.raises(KeyError):
+        responses = mast.MastMissions.query_criteria_async(
+            coordinates=regionCoords,
+            radius=5,
+            sci_pep_id=12556,
+            sci_obs_type='SPECTRUM',
+            sci_instrume='stis,acs,wfc3,cos,fos,foc,nicmos,ghrs',
+            sci_aec='S',
+            sci_aper_1234='WF3'
+        )
+        _json_to_table(json.loads(responses), 'results')
 
 
 ###################
@@ -205,10 +276,32 @@ def test_mast_service_request(patch_post):
     assert isinstance(result, Table)
 
 
+def test_mast_query(patch_post):
+    # cone search
+    result = mast.Mast.mast_query('Mast.Caom.Cone', ra=23.34086, dec=60.658, radius=0.2)
+    assert isinstance(result, Table)
+
+    # filtered search
+    result = mast.Mast.mast_query('Mast.Caom.Filtered',
+                                  dataproduct_type=['image'],
+                                  proposal_pi=['Osten, Rachel A.'],
+                                  s_dec=[{'min': 43.5, 'max': 45.5}])
+    pp_list = result['proposal_pi']
+    sd_list = result['s_dec']
+    assert isinstance(result, Table)
+    assert len(set(pp_list)) == 1
+    assert max(sd_list) < 45.5
+    assert min(sd_list) > 43.5
+
+    # error handling
+    with pytest.raises(InvalidQueryError) as invalid_query:
+        mast.Mast.mast_query('Mast.Caom.Filtered')
+    assert "Please provide at least one filter." in str(invalid_query.value)
+
+
 def test_resolve_object(patch_post):
     m103_loc = mast.Mast.resolve_object("M103")
-    print(m103_loc)
-    assert m103_loc.separation(SkyCoord("23.34086 60.658", unit='deg')).value == 0
+    assert round(m103_loc.separation(SkyCoord("23.34086 60.658", unit='deg')).value, 10) == 0
 
 
 def test_login_logout(patch_post):
@@ -349,6 +442,10 @@ def test_observations_get_product_list(patch_post):
     result = mast.Observations.get_product_list(observations[0:4])
     assert isinstance(result, Table)
 
+    in_obsids = ['83229830', '1829332', '26074149', '24556715']
+    result = mast.Observations.get_product_list(in_obsids)
+    assert isinstance(result, Table)
+
 
 def test_observations_filter_products(patch_post):
     products = mast.Observations.get_product_list('2003738726')
@@ -375,9 +472,17 @@ def test_observations_download_products(patch_post, tmpdir):
                                                  mrp_only=False)
     assert isinstance(result, Table)
 
+    # without console output
+    result = mast.Observations.download_products('2003738726',
+                                                 download_dir=str(tmpdir),
+                                                 productType=["SCIENCE"],
+                                                 verbose=False)
+    assert isinstance(result, Table)
+
     # passing row product
     products = mast.Observations.get_product_list('2003738726')
-    result1 = mast.Observations.download_products(products[0])
+    result1 = mast.Observations.download_products(products[0],
+                                                  download_dir=str(tmpdir))
     assert isinstance(result1, Table)
 
 
@@ -514,7 +619,7 @@ def test_catalogs_query_criteria(patch_post):
     assert isinstance(result, Table)
 
     with pytest.raises(InvalidQueryError) as invalid_query:
-        mast.Catalogs.query_criteria(catalog="Tic", objectName="M10")
+        mast.Catalogs.query_criteria(catalog="Tic", objectname="M10")
     assert "non-positional" in str(invalid_query.value)
 
 
@@ -600,11 +705,21 @@ def test_tesscut_get_sector(patch_post):
     assert sector_table['ccd'][0] == 3
 
     # Testing catch for multiple designators'
-    error_str = "Only one of moving_target and coordinates may be specified. Please remove coordinates if using moving_target and objectname."
+    error_str = ("Only one of moving_target and coordinates may be specified. "
+                 "Please remove coordinates if using moving_target and objectname.")
 
     with pytest.raises(InvalidQueryError) as invalid_query:
         mast.Tesscut.get_sectors(objectname='Ceres', moving_target=True, coordinates=coord)
     assert error_str in str(invalid_query.value)
+
+    # Testing invalid queries
+    with pytest.raises(InvalidQueryError) as invalid_query:
+        mast.Tesscut.get_sectors(objectname="M101", product="spooc")
+    assert "Input product must either be SPOC or TICA." in str(invalid_query.value)
+
+    with pytest.raises(InvalidQueryError) as invalid_query:
+        mast.Tesscut.get_sectors(objectname="M101", product="TICA", moving_target=True)
+    assert "Only SPOC is available for moving targets queries." in str(invalid_query.value)
 
 
 def test_tesscut_download_cutouts(patch_post, tmpdir):
@@ -644,7 +759,8 @@ def test_tesscut_download_cutouts(patch_post, tmpdir):
     assert os.path.isfile(manifest[0]['Local Path'])
 
     # Testing catch for multiple designators'
-    error_str = "Only one of moving_target and coordinates may be specified. Please remove coordinates if using moving_target and objectname."
+    error_str = ("Only one of moving_target and coordinates may be specified. "
+                 "Please remove coordinates if using moving_target and objectname.")
 
     with pytest.raises(InvalidQueryError) as invalid_query:
         mast.Tesscut.download_cutouts(objectname="Eleonora",
@@ -653,6 +769,15 @@ def test_tesscut_download_cutouts(patch_post, tmpdir):
                                       size=5,
                                       path=str(tmpdir))
     assert error_str in str(invalid_query.value)
+
+    # Testing invalid queries
+    with pytest.raises(InvalidQueryError) as invalid_query:
+        mast.Tesscut.download_cutouts(objectname="M101", product="spooc")
+    assert "Input product must either be SPOC or TICA." in str(invalid_query.value)
+
+    with pytest.raises(InvalidQueryError) as invalid_query:
+        mast.Tesscut.download_cutouts(objectname="M101", product="TICA", moving_target=True)
+    assert "Only SPOC is available for moving targets queries." in str(invalid_query.value)
 
 
 def test_tesscut_get_cutouts(patch_post, tmpdir):
@@ -678,7 +803,8 @@ def test_tesscut_get_cutouts(patch_post, tmpdir):
     assert isinstance(cutout_hdus_list[0], fits.HDUList)
 
     # Testing catch for multiple designators'
-    error_str = "Only one of moving_target and coordinates may be specified. Please remove coordinates if using moving_target and objectname."
+    error_str = ("Only one of moving_target and coordinates may be specified. "
+                 "Please remove coordinates if using moving_target and objectname.")
 
     with pytest.raises(InvalidQueryError) as invalid_query:
         mast.Tesscut.get_cutouts(objectname="Eleonora",
@@ -686,6 +812,15 @@ def test_tesscut_get_cutouts(patch_post, tmpdir):
                                  coordinates=coord,
                                  size=5)
     assert error_str in str(invalid_query.value)
+
+    # Testing invalid queries
+    with pytest.raises(InvalidQueryError) as invalid_query:
+        mast.Tesscut.get_cutouts(objectname="M101", product="spooc")
+    assert "Input product must either be SPOC or TICA." in str(invalid_query.value)
+
+    with pytest.raises(InvalidQueryError) as invalid_query:
+        mast.Tesscut.get_cutouts(objectname="M101", product="TICA", moving_target=True)
+    assert "Only SPOC is available for moving targets queries." in str(invalid_query.value)
 
 
 ######################

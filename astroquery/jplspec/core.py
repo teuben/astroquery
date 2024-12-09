@@ -27,7 +27,7 @@ class JPLSpecClass(BaseQuery):
     URL = conf.server
     TIMEOUT = conf.timeout
 
-    def query_lines_async(self, min_frequency, max_frequency,
+    def query_lines_async(self, min_frequency, max_frequency, *,
                           min_strength=-500,
                           max_lines=2000, molecule='All', flags=0,
                           parse_name_locally=False,
@@ -64,6 +64,9 @@ class JPLSpecClass(BaseQuery):
         get_query_payload : bool, optional
             When set to `True` the method should return the HTTP request
             parameters as a dict. Default value is set to False
+        cache : bool
+            Defaults to True. If set overrides global caching behavior.
+            See :ref:`caching documentation <astroquery_cache>`.
 
         Returns
         -------
@@ -126,7 +129,7 @@ class JPLSpecClass(BaseQuery):
 
         return response
 
-    def _parse_result(self, response, verbose=False):
+    def _parse_result(self, response, *, verbose=False):
         """
         Parse a response into an `~astropy.table.Table`
 
@@ -164,7 +167,7 @@ class JPLSpecClass(BaseQuery):
         # Warning for a result with more than 1000 lines:
         # THIS form is currently limited to 1000 lines.
         result = ascii.read(response.text, header_start=None, data_start=0,
-                            comment=r'THIS|^\s{12,14}\d{4,6}.*',
+                            comment=r'THIS|^\s{12,14}\d{4,6}.*|CADDIR CATDIR',
                             names=('FREQ', 'ERR', 'LGINT', 'DR', 'ELO', 'GUP',
                                    'TAG', 'QNFMT', 'QN\'', 'QN"'),
                             col_starts=(0, 13, 21, 29, 31, 41, 44, 51, 55, 67),
@@ -181,7 +184,7 @@ class JPLSpecClass(BaseQuery):
 
         return result
 
-    def get_species_table(self, catfile='catdir.cat'):
+    def get_species_table(self, *, catfile='catdir.cat'):
         """
         A directory of the catalog is found in a file called 'catdir.cat.'
         Each element of this directory is an 80-character record with the
@@ -238,9 +241,9 @@ JPLSpec = JPLSpecClass()
 def build_lookup():
 
     result = JPLSpec.get_species_table()
-    keys = list(result[1][:])  # convert NAME column to list
-    values = list(result[0][:])  # convert TAG column to list
-    dictionary = dict(zip(keys, values))  # make k,v dictionary
+    keys = list(result['NAME'])
+    values = list(result['TAG'])
+    dictionary = dict(zip(keys, values))
     lookuptable = lookup_table.Lookuptable(dictionary)  # apply the class above
 
     return lookuptable

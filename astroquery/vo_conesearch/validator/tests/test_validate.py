@@ -11,7 +11,6 @@ Tests for `astroquery.vo_conesearch.validator.validate`.
 """
 # STDLIB
 import os
-import shutil
 
 # THIRD-PARTY
 import pytest
@@ -33,9 +32,10 @@ class TestConeSearchValidation:
     """Validation on a small subset of Cone Search sites."""
 
     @pytest.fixture(autouse=True)
-    def setup_class(self, tmpdir):
+    def setup_class(self, tmp_path):
         self.datadir = 'data'
-        self.out_dir = tmpdir.mkdir('data').strpath
+        self.out_dir = tmp_path / self.datadir
+        self.out_dir.mkdir()
         self.filenames = {
             'good': 'conesearch_good.json',
             'warn': 'conesearch_warn.json',
@@ -51,10 +51,13 @@ class TestConeSearchValidation:
         db2 = VOSDatabase.from_json(fname2)
         assert db1.list_catalogs() == db2.list_catalogs()
 
+    # Ignore falling back to default size warning, ignore votable warning, and multiprocessing, too.
+    # See discussion e.g. in https://github.com/astropy/astroquery/issues/2634
+    @pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
+    @pytest.mark.filterwarnings("ignore::astropy.io.votable.exceptions.W06")
+    @pytest.mark.filterwarnings("ignore::astropy.utils.exceptions.AstropyUserWarning")
     @pytest.mark.parametrize(('parallel'), [True, False])
     def test_validation(self, parallel):
-        if os.path.exists(self.out_dir):
-            shutil.rmtree(self.out_dir)
 
         validate.check_conesearch_sites(
             destdir=self.out_dir, parallel=parallel, url_list=None)
@@ -64,6 +67,11 @@ class TestConeSearchValidation:
                 os.path.join(self.datadir, val)),
                 os.path.join(self.out_dir, val))
 
+    # Ignore falling back to default size warning, ignore votable warning, and multiprocessing, too.
+    # See discussion e.g. in https://github.com/astropy/astroquery/issues/2634
+    @pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
+    @pytest.mark.filterwarnings("ignore::astropy.io.votable.exceptions.W06")
+    @pytest.mark.filterwarnings("ignore::astropy.utils.exceptions.AstropyUserWarning")
     @pytest.mark.parametrize(('parallel'), [True, False])
     def test_url_list(self, parallel):
         local_outdir = os.path.join(self.out_dir, 'subtmp1')

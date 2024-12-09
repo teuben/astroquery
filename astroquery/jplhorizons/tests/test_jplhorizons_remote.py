@@ -1,53 +1,139 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-
-import pytest
-from astropy.tests.helper import assert_quantity_allclose
 from numpy.ma import is_masked
+import numpy as np
+import pytest
+
+from astropy.coordinates import spherical_to_cartesian
+from astropy.tests.helper import assert_quantity_allclose
+import astropy.units as u
+from astropy.coordinates import Angle
+from astropy.utils.exceptions import AstropyDeprecationWarning
 
 from ... import jplhorizons
 
 
 @pytest.mark.remote_data
 class TestHorizonsClass:
-
     def test_ephemerides_query(self):
-        # check values of Ceres for a given epoch
-        # orbital uncertainty of Ceres is basically zero
-        res = jplhorizons.Horizons(id='Ceres', location='500',
-                                   id_type='smallbody',
-                                   epochs=2451544.5).ephemerides()[0]
+        # check all values of Ceres for a given epoch
+        quantities = ",".join(str(q) for q in range(1, 49))
+        horizons = jplhorizons.Horizons(
+            id="Ceres", location="I41", id_type="smallbody", epochs=2451544.5
+        )
+        res = horizons.ephemerides(quantities=quantities)
 
-        assert res['targetname'] == "1 Ceres (A801 AA)"
-        assert res['datetime_str'] == "2000-Jan-01 00:00:00.000"
-        assert res['solar_presence'] == ""
-        assert res['flags'] == ""
-        assert res['elongFlag'] == '/L'
-        assert res['airmass'] == 999
+        # Rereshed 2024 Apr 09 via {k: res[k][0] for k in res.colnames}
+        values = {
+            'targetname': "1 Ceres (A801 AA)",
+            "datetime_str": "2000-Jan-01 00:00:00.000",
+            "datetime_jd": 2451544.5,
+            "H": 3.34 * u.mag,
+            "G": 0.12,
+            "solar_presence": "*",
+            "lunar_presence": "",
+            "RA": 188.7024 * u.deg,
+            "DEC": 9.09758 * u.deg,
+            "RA_app": 188.69858 * u.deg,
+            "DEC_app": 9.09806 * u.deg,
+            "RA_rate": 35.17815 * u.arcsec / u.hr,
+            "DEC_rate": -2.74237 * u.arcsec / u.hr,
+            "AZ": 325.548736 * u.deg,
+            "EL": -41.062749 * u.deg,
+            "AZ_rate": 781.92 * u.arcsec / u.minute,
+            "EL_rate": -426.18 * u.arcsec / u.minute,
+            "sat_X": -304791.02 * u.arcsec,
+            "sat_Y": 115814.995 * u.arcsec,
+            "sat_PANG": 277.607 * u.deg,
+            "siderealtime": 22.8737254836 * u.hr,
+            "airmass": 999,
+            "magextinct": np.ma.masked,
+            "V": 8.269 * u.mag,
+            "surfbright": 6.832 * u.mag / u.arcsec**2,
+            "illumination": 96.17086 * u.percent,
+            "illum_defect": 0.0227 * u.arcsec,
+            "sat_sep": 343433.5 * u.arcsec,
+            "sat_vis": "*",
+            "ang_width": 0.593755 * u.arcsec,
+            "PDObsLon": 301.942894 * u.deg,
+            "PDObsLat": -4.073159 * u.deg,
+            "PDSunLon": 279.338807 * u.deg,
+            "PDSunLat": -3.704743 * u.deg,
+            "SubSol_ang": 112.55 * u.deg,
+            "SubSol_dist": 0.11 * u.arcsec,
+            "NPole_ang": 22.6751 * u.deg,
+            "NPole_dist": -0.271 * u.arcsec,
+            "EclLon": 161.3828 * u.deg,
+            "EclLat": 10.4528 * u.deg,
+            "r": 2.551099025883 * u.au,
+            "r_rate": 0.1744491 * u.km / u.s,
+            "delta": 2.26317926925737 * u.au,
+            "delta_rate": -21.7732311 * u.km / u.s,
+            "lighttime": 18.82228803 * u.minute,
+            "vel_sun": 19.3602212 * u.km / u.s,
+            "vel_obs": 27.0721344 * u.km / u.s,
+            "elong": 95.3982 * u.deg,
+            "elongFlag": "/L",
+            "alpha": 22.5696 * u.deg,
+            "lunar_elong": 32.9 * u.deg,
+            "lunar_illum": 27.4882 * u.percent,
+            "sat_alpha": 62.04 * u.deg,
+            "sunTargetPA": 292.552 * u.deg,
+            "velocityPA": 296.849 * u.deg,
+            "OrbPlaneAng": -1.53489 * u.deg,
+            "constellation": "Vir",
+            "TDB-UT": 64.183887 * u.s,
+            "ObsEclLon": 184.3424861 * u.deg,
+            "ObsEclLat": 11.7988212 * u.deg,
+            "NPole_RA": 291.418 * u.deg,
+            "NPole_DEC": 66.764 * u.deg,
+            "GlxLon": 289.863376 * u.deg,
+            "GlxLat": 71.54487 * u.deg,
+            "solartime": 16.158787179 * u.hour,
+            "earth_lighttime": 0.000354 * u.minute,
+            "RA_3sigma": 0.0 * u.arcsec,
+            "DEC_3sigma": 0.0 * u.arcsec,
+            "SMAA_3sigma": 0.00012 * u.arcsec,
+            "SMIA_3sigma": 5e-05 * u.arcsec,
+            "Theta_3sigma": -24.786 * u.deg,
+            "Area_3sigma": 0.0 * u.arcsec**2,
+            "RSS_3sigma": 0.0 * u.arcsec,
+            "r_3sigma": 0.0904 * u.km,
+            "r_rate_3sigma": 0.0 * u.km / u.s,
+            "SBand_3sigma": 0.0 * u.Hz,
+            "XBand_3sigma": 0.0 * u.Hz,
+            "DoppDelay_3sigma": 1e-06 * u.s,
+            "true_anom": 7.1181 * u.deg,
+            "hour_angle": 10.293820034 * u.hour,
+            "alpha_true": 22.5691 * u.deg,
+            "PABLon": 172.8355 * u.deg,
+            "PABLat": 11.3478 * u.deg,
+            "App_Lon_Sun": 309.1190962 * u.deg,
+            "RA_ICRF_app": 188.70238 * u.deg,
+            "DEC_ICRF_app": 9.09628 * u.deg,
+            "RA_ICRF_rate_app": 35.17809 * u.arcsec / u.hour,
+            "DEC_ICRF_rate_app": -2.74321 * u.arcsec / u.hour,
+            "Sky_motion": 0.5880814 * u.arcsec / u.minute,
+            "Sky_mot_PA": 94.457576 * u.deg,
+            "RelVel-ANG": -53.53947 * u.deg,
+            "Lun_Sky_Brt": np.ma.masked,
+            "sky_SNR": np.ma.masked,
+        }
 
-        assert is_masked(res['AZ'])
-        assert is_masked(res['EL'])
-        assert is_masked(res['magextinct'])
+        # the ephemeris changes with Ceres's and the planets' orbital elements,
+        # which can be updated at any time, so only check for 10% tolerance, this
+        # is enough to verify that most columns are not being confused, and that
+        # units are correct
 
-        assert_quantity_allclose(
-            [2451544.5,
-             188.70280, 9.09829, 34.40955, -2.68359,
-             8.469, 7.009, 96.17083,
-             161.3828, 10.4528, 2.551099014238, 0.1744491,
-             2.26315116146176, -21.9390511, 18.822054,
-             95.3996, 22.5698, 292.551, 296.850,
-             184.3426220, 11.7996521, 289.864329, 71.545655,
-             0, 0],
-            [res['datetime_jd'],
-             res['RA'], res['DEC'], res['RA_rate'], res['DEC_rate'],
-             res['V'], res['surfbright'], res['illumination'],
-             res['EclLon'], res['EclLat'], res['r'], res['r_rate'],
-             res['delta'], res['delta_rate'], res['lighttime'],
-             res['elong'], res['alpha'], res['sunTargetPA'],
-             res['velocityPA'],
-             res['ObsEclLon'], res['ObsEclLat'], res['GlxLon'],
-             res['GlxLat'],
-             res['RA_3sigma'], res['DEC_3sigma']], rtol=1e-3)
+        for column, value in values.items():
+            if isinstance(value, (u.Quantity, Angle)):
+                assert u.isclose(res[column], value, rtol=0.1)
+            elif value is np.ma.masked:
+                assert is_masked(res[column])
+            elif isinstance(value, (float, int)):
+                assert np.isclose(res[column], value, rtol=0.1)
+            else:
+                assert res[column] == value
 
     def test_ephemerides_query_two(self):
         # check comet ephemerides using options
@@ -67,7 +153,7 @@ class TestHorizonsClass:
         assert res['targetname'] == "1P/Halley"
         assert res['datetime_str'] == "2080-Jan-11 09:00"
         assert res['solar_presence'] == ""
-        assert res['flags'] == "m"
+        assert res['lunar_presence'] == "m"
         assert res['elongFlag'] == '/L'
 
         for value in ['H', 'G']:
@@ -90,7 +176,7 @@ class TestHorizonsClass:
         assert res['targetname'] == "73P/Schwassmann-Wachmann 3"
         assert res['datetime_str'] == "2080-Jan-01 00:00"
         assert res['solar_presence'] == "*"
-        assert res['flags'] == "m"
+        assert res['lunar_presence'] == "m"
         assert res['elongFlag'] == '/L'
 
         for value in ['H', 'G']:
@@ -115,7 +201,7 @@ class TestHorizonsClass:
         assert res['targetname'] == "167P/CINEOS"
         assert res['datetime_str'] == "2080-Jan-01 00:00"
         assert res['solar_presence'] == "*"
-        assert res['flags'] == "m"
+        assert res['lunar_presence'] == "m"
         assert res['elongFlag'] == '/T'
 
         for value in ['H', 'G', 'M1', 'k1']:
@@ -142,7 +228,7 @@ class TestHorizonsClass:
         assert res['targetname'] == "12P/Pons-Brooks"
         assert res['datetime_str'] == "2080-Jan-01 00:00"
         assert res['solar_presence'] == "*"
-        assert res['flags'] == "m"
+        assert res['lunar_presence'] == "m"
         assert res['elongFlag'] == '/L'
 
         for value in ['H', 'G', 'phasecoeff']:
@@ -152,7 +238,13 @@ class TestHorizonsClass:
             assert value in res.colnames
 
     def test_ephemerides_query_six(self):
-        # tests optional constrains for ephemerides queries
+        """Tests optional constraints for ephemerides queries.
+
+        Also acts as a regression test for issue #2977 using refraction=True and
+        extra_precision=True
+
+        """
+
         obj = jplhorizons.Horizons(id='3552', id_type='smallbody',
                                    location='I33',
                                    epochs={'start': '2018-05-01',
@@ -162,6 +254,7 @@ class TestHorizonsClass:
         res = obj.ephemerides(skip_daylight=True,
                               max_hour_angle=8,
                               refraction=True,
+                              extra_precision=True,
                               refsystem='B1950',
                               rate_cutoff=100,
                               airmass_lessthan=5)
@@ -169,9 +262,13 @@ class TestHorizonsClass:
         assert len(res) == 32
 
     def test_ephemerides_query_raw(self):
-        res = (jplhorizons.Horizons(id='Ceres', location='500',
-                                    id_type='smallbody', epochs=2451544.5).
-               ephemerides(get_raw_response=True))
+        # deprecated as of #2418
+        with pytest.warns(AstropyDeprecationWarning):
+            res = (jplhorizons.Horizons(id='Ceres',
+                                        location='500',
+                                        id_type='smallbody',
+                                        epochs=2451544.5)
+                   .ephemerides(get_raw_response=True))
 
         assert len(res) >= 15400
 
@@ -221,10 +318,13 @@ class TestHorizonsClass:
                                  rtol=1e-3)
 
     def test_elements_query_raw(self):
-        res = jplhorizons.Horizons(id='Ceres', location='500@10',
-                                   id_type='smallbody',
-                                   epochs=2451544.5).elements(
-                                       get_raw_response=True)
+        # deprecated as of #2418
+        with pytest.warns(AstropyDeprecationWarning):
+            res = (jplhorizons.Horizons(id='Ceres',
+                                        location='500@10',
+                                        id_type='smallbody',
+                                        epochs=2451544.5)
+                   .elements(get_raw_response=True))
 
         assert len(res) >= 6686
 
@@ -255,12 +355,38 @@ class TestHorizonsClass:
              res['range_rate']], rtol=1e-3)
 
     def test_vectors_query_raw(self):
-        res = jplhorizons.Horizons(id='Ceres', location='500@10',
-                                   id_type='smallbody',
-                                   epochs=2451544.5).vectors(
-                                       get_raw_response=True)
+        # deprecated as of #2418
+        with pytest.warns(AstropyDeprecationWarning):
+            res = (jplhorizons.Horizons(id='Ceres',
+                                        location='500@10',
+                                        id_type='smallbody',
+                                        epochs=2451544.5)
+                   .vectors(get_raw_response=True))
 
         assert len(res) >= 6412
+
+    @pytest.mark.parametrize(
+        "location",
+        (
+            {"lon": 244, "lat": 33, "elevation": 1.7},
+            {"lon": (244 * u.deg).to(u.rad), "lat": (33 * u.deg).to(u.rad), "elevation": 1700 * u.m},
+        )
+    )
+    def test_vectors_query_topocentric_coordinates(self, location):
+        "Test vectors query specifying observer's longitude, latitude, and elevation"
+        q = jplhorizons.Horizons(id='Ceres',
+                                 location=location,
+                                 id_type='smallbody',
+                                 epochs=2451544.5)
+        res = q.vectors_async()
+        i = res.text.find("Center geodetic :")
+        j = res.text.find("\n", i)
+        parts = res.text[i:j].split()
+        assert parts[3:6] == ['244.0,', '33.0,', '1.7']
+
+        start = res.text.find("$$SOE")
+        end = res.text.find("$$EOE")
+        assert res.text[start:end].find("2000-Jan-01") > 0
 
     def test_unknownobject(self):
         with pytest.raises(ValueError):
@@ -387,3 +513,35 @@ class TestHorizonsClass:
         vec_highprec = obj.ephemerides(extra_precision=True)
 
         assert (vec_simple['RA'][0]-vec_highprec['RA'][0]) > 1e-7
+
+    def test_geodetic_queries(self):
+        """
+        black-box test for observer and vectors queries with geodetic
+        coordinates. checks spatial sensibility.
+        """
+        phobos = {'body': 401, 'lon': -30, 'lat': -20, 'elevation': 0}
+        deimos = {'body': 402, 'lon': -10, 'lat': -40, 'elevation': 0}
+        deimos_phobos = jplhorizons.Horizons(phobos, location=deimos, epochs=2.4e6)
+        phobos_deimos = jplhorizons.Horizons(deimos, location=phobos, epochs=2.4e6)
+        pd_eph, dp_eph = phobos_deimos.ephemerides(), deimos_phobos.ephemerides()
+        dp_xyz = spherical_to_cartesian(
+            dp_eph['delta'], dp_eph['DEC'], dp_eph['RA']
+        )
+        pd_xyz = spherical_to_cartesian(
+            pd_eph['delta'], pd_eph['DEC'], pd_eph['RA']
+        )
+        elementwise = [(dp_el + pd_el) for dp_el, pd_el in zip(dp_xyz, pd_xyz)]
+        eph_offset = (sum([off ** 2 for off in elementwise]) ** 0.5).to(u.km)
+        # horizons can do better than this, but we'd have to go to a little
+        # more trouble than is necessary for a software test...
+        assert np.isclose(eph_offset.value, 2.558895)
+        # ...and vectors queries are really what you're meant to use for
+        # this sort of thing.
+        pd_vec, dp_vec = phobos_deimos.vectors(), deimos_phobos.vectors()
+        vec_offset = np.sum(
+            (
+                pd_vec.as_array(names=('x', 'y', 'z')).view('f8')
+                + dp_vec.as_array(names=('x', 'y', 'z')).view('f8')
+            ) ** 2
+        )
+        assert np.isclose(vec_offset, 0)

@@ -1,6 +1,7 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
 import os
+from contextlib import contextmanager
 
 from numpy import testing as npt
 import pytest
@@ -47,12 +48,14 @@ def patch_get(request):
 
 @pytest.fixture
 def patch_get_readable_fileobj(request):
+    @contextmanager
     def get_readable_fileobj_mockreturn(filename, cache=True, encoding=None,
                                         show_progress=True):
         # Need to read FITS files with binary encoding: should raise error
         # otherwise
         assert encoding == 'binary'
-        return open(data_path(DATA_FILES['image']), 'rb')
+        with open(data_path(DATA_FILES['image']), 'rb') as infile:
+            yield infile
 
     mp = request.getfixturevalue("monkeypatch")
 
@@ -69,7 +72,8 @@ def get_mockreturn(method, url, params=None, timeout=10, **kwargs):
         filename = data_path(DATA_FILES['extract_urls'])
     else:
         filename = data_path(DATA_FILES['object'])
-    content = open(filename, "rb").read()
+    with open(filename, 'rb') as infile:
+        content = infile.read()
     return MockResponse(content, **kwargs)
 
 
@@ -137,7 +141,8 @@ def test_photometry(patch_get):
 
 
 def test_extract_image_urls():
-    html_in = open(data_path(DATA_FILES['extract_urls']), 'r').read()
+    with open(data_path(DATA_FILES['extract_urls']), 'r') as infile:
+        html_in = infile.read()
     url_list = ned.core.Ned._extract_image_urls(html_in)
     assert len(url_list) == 5
     for url in url_list:
@@ -162,7 +167,7 @@ def test_get_images(patch_get, patch_get_readable_fileobj):
 
 
 def test_query_refcode_async(patch_get):
-    response = ned.core.Ned.query_refcode_async('1997A&A...323...31K', True)
+    response = ned.core.Ned.query_refcode_async('1997A&A...323...31K', get_query_payload=True)
     assert response == {'search_type': 'Search',
                         'refcode': '1997A&A...323...31K',
                         'hconst': conf.hubble_constant,
@@ -216,8 +221,7 @@ def test_query_region_async(monkeypatch, patch_get):
     assert response['search_type'] == "Near Name Search"
     # check with Galactic coordinates
     response = ned.core.Ned.query_region_async(
-        commons.GalacticCoordGenerator(l=-67.02084, b=-29.75447,
-                                       unit=(u.deg, u.deg)),
+        coord.SkyCoord(l=-67.02084 * u.deg, b=-29.75447 * u.deg, frame="galactic"),
         get_query_payload=True)
     assert response['search_type'] == 'Near Position Search'
     npt.assert_approx_equal(
@@ -261,7 +265,8 @@ def test_get_object_notes(patch_get):
 
 
 def test_parse_result(capsys):
-    content = open(data_path(DATA_FILES['error']), 'rb').read()
+    with open(data_path(DATA_FILES['error']), 'rb') as infile:
+        content = infile.read()
     response = MockResponse(content)
     with pytest.raises(RemoteServiceError) as exinfo:
         ned.core.Ned._parse_result(response)
@@ -277,4 +282,4 @@ def test_parse_result(capsys):
 
 def test_deprecated_namespace_import_warning():
     with pytest.warns(DeprecationWarning):
-        import astroquery.ned
+        import astroquery.ned  # noqa: F401

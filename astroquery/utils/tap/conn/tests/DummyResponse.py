@@ -21,19 +21,23 @@ class DummyResponse:
     classdocs
     '''
 
-    def __init__(self):
+    STATUS_MESSAGES = {200: "OK", 303: "OK", 500: "ERROR"}
+
+    def __init__(self, status_code=None):
+        self.zip_bytes = None
         self.reason = ""
-        self.status = 0
+        self.set_status_code(status_code)
         self.index = 0
         self.set_data(None, None, None, None)
 
-    def set_status_code(self, status):
-        self.status = status
+    def __iter__(self):
+        return iter([self.get_body().encode(encoding='UTF-8')])
 
-    def set_message(self, reason):
-        self.reason = reason
+    def set_status_code(self, status_code):
+        self.status = status_code
+        self.reason = self.STATUS_MESSAGES.get(status_code)
 
-    def set_data(self, method, context, body, headers):
+    def set_data(self, method, context=None, body=None, headers=None):
         self.method = method
         self.context = context
         self.body = body
@@ -54,11 +58,29 @@ class DummyResponse:
         if v is None:
             return None
         else:
+
+            if v.endswith('zip'):
+                if self.zip_bytes is None:
+                    with open(v, 'rb') as file:
+                        self.zip_bytes = file.read()
+
             if size is None or size < 0:
+
+                if v.endswith('zip'):
+                    return self.zip_bytes
+
                 # read all
                 return v.encode(encoding='utf_8', errors='strict')
             else:
-                bodyLength = len(v)
+                is_zip = False
+
+                if v.endswith('zip'):
+                    is_zip = True
+                    bodyLength = len(self.zip_bytes)
+                    v = self.zip_bytes
+                else:
+                    bodyLength = len(v)
+
                 if self.index < 0:
                     return ""
                 if size >= bodyLength:
@@ -70,7 +92,11 @@ class DummyResponse:
                 self.index = endPos
                 if endPos >= (bodyLength - 1):
                     self.index = -1
-                return tmp.encode(encoding='utf_8', errors='strict')
+
+                if is_zip:
+                    return tmp
+                else:
+                    return tmp.encode(encoding='utf_8', errors='strict')
 
     def close(self):
         self.index = 0

@@ -1,81 +1,80 @@
 # -*- coding: utf-8 -*
 
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from ..query import BaseQuery
+import io
+import json
+import warnings
 
+import numpy as np
+from astropy.io import fits
+from astropy.coordinates import Angle
+import astropy.units as u
+from PIL import Image
+
+from astropy.utils.exceptions import AstropyUserWarning
+
+from ..query import BaseQuery
 from ..utils.class_or_instance import class_or_instance
 from ..utils import async_to_sync
 from . import conf
 
-from astropy import wcs
 
 __all__ = ['hips2fits', 'hips2fitsClass']
 __doctest_skip__ = ['hips2fitsClass.*']
-
-import json
-
-# Numpy is used for deserializing the string of bytes
-# returned by hips2fits into a valid float32 numpy array
-import numpy as np
-# astropy.io.fits is used for creating a new HDUList
-# from the image data received
-from astropy.io import fits
-from astropy.coordinates import Angle
-import astropy.units as u
-
-# Used for deserializing string of bytes to an image (i.e. a numpy array)
-import io
-from PIL import Image
-
-from astropy.utils.exceptions import AstropyUserWarning
-import warnings
 
 
 @async_to_sync
 class hips2fitsClass(BaseQuery):
     """
-    Query the `CDS hips2fits service <http://alasky.u-strasbg.fr/hips-image-services/hips2fits>`_
+    Query the `CDS hips2fits service <https://alasky.cds.unistra.fr/hips-image-services/hips2fits>`_
 
-    The `CDS hips2fits service <http://alasky.u-strasbg.fr/hips-image-services/hips2fits>`_ offers a way
+    The `CDS hips2fits service <https://alasky.cds.unistra.fr/hips-image-services/hips2fits>`_ offers a way
     to extract FITS images from HiPS sky maps. HiPS is an IVOA standard that combines individual images in
     order to produce a progressive hierarchical sky map describing the whole survey. Please refer to the
     `IVOA paper <http://www.ivoa.net/documents/HiPS/20170519/REC-HIPS-1.0-20170519.pdf>`_ for more info.
 
     Given an astropy user-defined WCS with an HiPS name
-    (see the list of valid HiPS names hosted in CDS `here <http://aladin.unistra.fr/hips/list>`_),
+    (see the list of valid HiPS names hosted in CDS `here <https://aladin.cds.unistra.fr/hips/list>`_),
     hips2fits will return you the corresponding FITS image (JPG/PNG output formats are also implemented).
 
     This package implements two methods:
 
-    * :meth:`~astroquery.hips2fits.hips2fitsClass.query_with_wcs` extracting a FITS image from a HiPS and an astropy ``wcs.WCS``.
-        See `here <http://aladin.unistra.fr/hips/list>`_ all the valid HiPS names hosted in CDS.
-    * :meth:`~astroquery.hips2fits.hips2fitsClass.query` extracting a FITS image from a HiPS given the output image pixel size, the center of projection, the type of projection and the field of view.
-        See `here <http://aladin.unistra.fr/hips/list>`_ all the valid HiPS names hosted in CDS.
+    * `~astroquery.hips2fits.hips2fitsClass.query_with_wcs` extracting a FITS image from a HiPS and an
+      astropy `~astropy.wcs.WCS`.
+      See `here <https://aladin.cds.unistra.fr/hips/list>`_ all the valid HiPS names hosted in CDS.
+
+    * `~astroquery.hips2fits.hips2fitsClass.query` extracting a FITS image from a HiPS given the output
+      image pixel size, the center of projection, the type of projection and the field of view.
+      See `here <https://aladin.cds.unistra.fr/hips/list>`_ all the valid HiPS names hosted in CDS.
+
 
     """
     server = conf.server
     timeout = conf.timeout
 
     def __init__(self, *args):
-        super(hips2fitsClass, self).__init__()
+        super().__init__()
 
-    def query_with_wcs(self, hips, wcs, format="fits", min_cut=0.5, max_cut=99.5, stretch="linear", cmap="Greys_r", get_query_payload=False, verbose=False):
+    def query_with_wcs(self, hips, wcs, *, format="fits", min_cut=0.5, max_cut=99.5, stretch="linear",
+                       cmap="Greys_r", get_query_payload=False, verbose=False):
         """
-        Query the `CDS hips2fits service <http://alasky.u-strasbg.fr/hips-image-services/hips2fits>`_ with a astropy WCS.
+        Query the `CDS hips2fits service <https://alasky.cds.unistra.fr/hips-image-services/hips2fits>`_ with an
+        astropy WCS.
 
         Parameters
         ----------
         hips : str
             ID or keyword identifying the HiPS to use.
             If multiple HiPS surveys match, one is chosen randomly.
-            See the list of valid HiPS ids hosted by the CDS `here <http://aladin.unistra.fr/hips/list>`_.
+            See the list of valid HiPS ids hosted by the CDS `here <https://aladin.cds.unistra.fr/hips/list>`_.
         wcs : `~astropy.wcs.WCS`
             An astropy WCS defining the astrometry you wish.
             Alternatively, you can pass lon, lat, fov, coordsys keywords.
         format : str, optional
             Format of the output image.
             Allowed values are fits (default), jpg and png
-            In case of jpg or png format, scaling of the pixels value can be controlled with parameters ``min_cut``, ``max_cut`` and ``stretch``
+            In case of jpg or png format, scaling of the pixels value can be controlled with parameters ``min_cut``,
+            ``max_cut`` and ``stretch``
         min_cut : float, optional
             Minimal value considered for contrast adjustment normalization.
             Only applicable to jpg/png output formats.
@@ -91,7 +90,7 @@ class hips2fitsClass(BaseQuery):
         cmap : `~matplotlib.colors.Colormap` or str, optional
             Name of the color map.
             Only applicable to jpg/png output formats.
-            Any `colormap supported by Matplotlib <https://matplotlib.org/3.1.1/gallery/color/colormap_reference.html>`_ can be specified.
+            Any colormap supported by Matplotlib can be specified.
             Default value is Greys_r (grayscale)
         get_query_payload : bool, optional
             If True, returns a dictionary of the query payload instead of the parsed response.
@@ -137,8 +136,10 @@ class hips2fitsClass(BaseQuery):
         ... )
         >>> im = plt.imshow(result)
         >>> plt.show(im)
+
         """
-        response = self.query_with_wcs_async(get_query_payload, hips=hips, wcs=wcs, format=format, min_cut=min_cut, max_cut=max_cut, stretch=stretch, cmap=cmap)
+        response = self.query_with_wcs_async(get_query_payload=get_query_payload, hips=hips, wcs=wcs, format=format,
+                                             min_cut=min_cut, max_cut=max_cut, stretch=stretch, cmap=cmap)
 
         if get_query_payload:
             return response
@@ -147,7 +148,7 @@ class hips2fitsClass(BaseQuery):
         return result
 
     @class_or_instance
-    def query_with_wcs_async(self, get_query_payload=False, **kwargs):
+    def query_with_wcs_async(self, *, get_query_payload=False, **kwargs):
         request_payload = self._args_to_payload(**kwargs)
 
         # primarily for debug purposes, but also useful if you want to send
@@ -166,30 +167,36 @@ class hips2fitsClass(BaseQuery):
 
         return response
 
-    def query(self, hips, width, height, projection, ra, dec, fov, coordsys="icrs", rotation_angle=Angle(0 * u.deg), format="fits", min_cut=0.5, max_cut=99.5, stretch="linear", cmap="Greys_r", get_query_payload=False, verbose=False):
+    def query(self, hips, width, height, projection, ra, dec, fov, *,
+              coordsys="icrs", rotation_angle=Angle(0 * u.deg), format="fits",
+              min_cut=0.5, max_cut=99.5, stretch="linear", cmap="Greys_r",
+              get_query_payload=False, verbose=False):
         """
-        Query the `CDS hips2fits service <http://alasky.u-strasbg.fr/hips-image-services/hips2fits>`_.
+        Query the `CDS hips2fits service <https://alasky.cds.unistra.fr/hips-image-services/hips2fits>`_.
 
         If you have not any WCS, you can call this method by passing:
         * The width/height size of the output pixel image
         * The center of projection in world coordinates (ra, dec)
         * The fov angle in world coordinates
         * The rotation angle of the projection
-        * The name of the projection. All `astropy projections <https://docs.astropy.org/en/stable/wcs/#supported-projections>`_ are supported:
+        * The name of the projection.
+
+        All `astropy projections <https://docs.astropy.org/en/stable/wcs/supported_projections.html>`_ are supported.
 
         Parameters
         ----------
         hips : str
             ID or keyword identifying the HiPS to use.
             If multiple HiPS surveys match, one is chosen randomly.
-            See the list of valid HiPS ids hosted by the CDS `here <http://aladin.unistra.fr/hips/list>`_.
+            See the list of valid HiPS ids hosted by the CDS `here <https://aladin.cds.unistra.fr/hips/list>`_.
         width : int
             Width in pixels of the output image.
         height : int
             Height in pixels of the output image.
         projection : str
-            Name of the requested projection, eg: SIN, TAN, MOL, AIT, CAR, CEA, STG	Compulsory if wcs is not provided.
-            See `this page <https://docs.astropy.org/en/stable/wcs/#supported-projections>`_ for an exhaustive list.
+            Name of the requested projection, eg: SIN, TAN, MOL, AIT, CAR, CEA, STG
+            Compulsory if wcs is not provided.
+            See `this page <https://docs.astropy.org/en/stable/wcs/supported_projections.html>`_ for an exhaustive list.
         fov : `~astropy.coordinates.Angle`
             Size (FoV) of the cutout on the sky.
             This is the size of the largest dimension of the image.
@@ -207,7 +214,8 @@ class hips2fitsClass(BaseQuery):
         format : str, optional
             Format of the output image.
             Allowed values are fits (default), jpg and png
-            In case of jpg or png format, scaling of the pixels value can be controlled with parameters ``min_cut``, ``max_cut`` and ``stretch``
+            In case of jpg or png format, scaling of the pixels value can be controlled with parameters ``min_cut``,
+            ``max_cut`` and ``stretch``
         min_cut : float, optional
             Minimal value considered for contrast adjustment normalization.
             Only applicable to jpg/png output formats.
@@ -223,7 +231,7 @@ class hips2fitsClass(BaseQuery):
         cmap : `~matplotlib.colors.Colormap` or str, optional
             Name of the color map.
             Only applicable to jpg/png output formats.
-            Any `colormap supported by Matplotlib <https://matplotlib.org/3.1.1/gallery/color/colormap_reference.html>`_ can be specified.
+            Any colormap supported by Matplotlib can be specified.
             Default value is Greys_r (grayscale)
         get_query_payload : bool, optional
             If True, returns a dictionary of the query payload instead of the parsed response.
@@ -261,7 +269,10 @@ class hips2fitsClass(BaseQuery):
         >>> plt.show(im)
         """
 
-        response = self.query_async(get_query_payload, hips=hips, width=width, height=height, projection=projection, ra=ra, dec=dec, fov=fov, coordsys=coordsys, rotation_angle=rotation_angle, format=format, min_cut=min_cut, max_cut=max_cut, stretch=stretch, cmap=cmap)
+        response = self.query_async(get_query_payload=get_query_payload, hips=hips, width=width, height=height,
+                                    projection=projection, ra=ra, dec=dec, fov=fov, coordsys=coordsys,
+                                    rotation_angle=rotation_angle, format=format, min_cut=min_cut,
+                                    max_cut=max_cut, stretch=stretch, cmap=cmap)
 
         if get_query_payload:
             return response
@@ -270,7 +281,7 @@ class hips2fitsClass(BaseQuery):
         return result
 
     @class_or_instance
-    def query_async(self, get_query_payload=False, **kwargs):
+    def query_async(self, *, get_query_payload=False, **kwargs):
         request_payload = self._args_to_payload(**kwargs)
 
         # primarily for debug purposes, but also useful if you want to send
@@ -345,7 +356,7 @@ class hips2fitsClass(BaseQuery):
             header_str = json.dumps(header_json)
             payload.update({'wcs': header_str})
         else:
-        # The user called query
+            # The user called query
             payload.update({
                 'width': kwargs.pop("width"),
                 'height': kwargs.pop("height"),

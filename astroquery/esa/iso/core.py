@@ -1,23 +1,20 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """
-
-@author: Jesus Salgado
-@contact: jesusjuansalgado@gmail.com
+=====================
+ISO Astroquery Module
+=====================
 
 European Space Astronomy Centre (ESAC)
 European Space Agency (ESA)
-
-Created on 14 July 2020
-
 
 """
 import re
 from astroquery.utils.tap.core import TapPlus
 from astroquery.query import BaseQuery
 import shutil
-import cgi
-import sys
-import requests
+import os
+from email.message import Message
+from requests import HTTPError
 from pathlib import Path
 
 from . import conf
@@ -34,7 +31,7 @@ class ISOClass(BaseQuery):
     TIMEOUT = conf.TIMEOUT
 
     def __init__(self, tap_handler=None):
-        super(ISOClass, self).__init__()
+        super().__init__()
 
         if tap_handler is None:
             self._tap = TapPlus(url=self.metadata_url)
@@ -126,9 +123,9 @@ class ISOClass(BaseQuery):
         response.raise_for_status()
 
         # Get original extension
-        _, params = cgi.parse_header(response.headers['Content-Disposition'])
-        r_filename = params["filename"]
-        suffixes = Path(r_filename).suffixes
+        message = Message()
+        message["content-type"] = response.headers["Content-Disposition"]
+        suffixes = Path(message.get_param("filename")).suffixes
 
         if filename is None:
             filename = tdt
@@ -215,8 +212,8 @@ class ISOClass(BaseQuery):
             response = self._request('HEAD', link)
             response.raise_for_status()
 
-            filename = re.findall('filename="(.+)"', response.headers[
-                "Content-Disposition"])[0]
+            filename = os.path.basename(re.findall('filename="(.+)"', response.headers[
+                "Content-Disposition"])[0])
         else:
 
             filename = filename + ".png"

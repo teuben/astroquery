@@ -29,7 +29,7 @@ instance if you want to query NGC 224
     No. Object Name     RA     ... Redshift Points Diameter Points Associations
                      degrees   ...
     --- ----------- ---------- ... --------------- --------------- ------------
-      1 MESSIER 031   10.68479 ...              37               7            2
+      1 MESSIER 031   10.68479 ...              40              13            2
 
 
 Query a region
@@ -58,11 +58,11 @@ specified. By default this is J2000.0 but can also be set to B1950.0.
       3 SSTSL2 J122855.23+020341.5  187.23013 ...               0            0
       4 SSTSL2 J122855.36+020346.9  187.23068 ...               0            0
     ...                        ...        ... ...             ...          ...
-    863 SSTSL2 J122918.24+020330.7    187.326 ...               0            0
-    864   SDSS J122918.38+020323.4   187.3266 ...               4            0
-    865 SSTSL2 J122918.52+020338.9  187.32718 ...               0            0
-    866 SSTSL2 J122918.64+020326.7  187.32767 ...               0            0
-    Length = 866 rows
+    864 SSTSL2 J122918.24+020330.7    187.326 ...               0            0
+    865   SDSS J122918.38+020323.4   187.3266 ...               4            0
+    866 SSTSL2 J122918.52+020338.9  187.32718 ...               0            0
+    867 SSTSL2 J122918.64+020326.7  187.32767 ...               0            0
+    Length = 867 rows
 
 
 Instead of using the name, the target may also be specified via
@@ -140,16 +140,15 @@ These queries can be used to retrieve all objects that appear in the specified
     No.        Object Name            RA     ... Diameter Points Associations
                                    degrees   ...
     --- ------------------------- ---------- ... --------------- ------------
-      1                  NGC 0262   12.19642 ...               8            0
+      1                  NGC 0262   12.19642 ...              12            0
       2                  NGC 0449    19.0302 ...               7            0
       3                  NGC 0591   23.38028 ...               7            0
-      4                 UGC 01214   25.99084 ...               7            0
+      4                 UGC 01214   25.99084 ...              12            0
     ...                       ...        ... ...             ...          ...
      33 WISEA J202325.39+113134.6  305.85577 ...               2            0
      34                 UGC 12149  340.28163 ...               8            0
      35                  MRK 0522  345.07954 ...               4            0
      36                  NGC 7674  351.98635 ...               8            0
-    Length = 36 rows
 
 
 Image and Spectra Queries
@@ -162,15 +161,15 @@ specified name. For instance:
 
     >>> from astroquery.ipac.ned import Ned
     >>> images = Ned.get_images("m1")  # doctest: +IGNORE_OUTPUT
-    Downloading http://ned.ipac.caltech.edu/dss1B2/Bb/MESSIER_001:I:103aE:dss1.fits.gz
+    Downloading https://ned.ipac.caltech.edu/dss1B2/Bb/MESSIER_001:I:103aE:dss1.fits.gz
     |===========================================|  32k/ 32k (100.00%)        00s
-    Downloading http://ned.ipac.caltech.edu/img5/1995RXCD3.T...0000C/p083n22a:I:0.1-2.4keV:cop1995.fits.gz
+    Downloading https://ned.ipac.caltech.edu/img5/1995RXCD3.T...0000C/p083n22a:I:0.1-2.4keV:cop1995.fits.gz
     |===========================================|  52k/ 52k (100.00%)        01s
-    Downloading http://ned.ipac.caltech.edu/img5/1996RXCD6.T...0000C/p083n22a:I:0.1-2.4keV:cps1996.fits.gz
+    Downloading https://ned.ipac.caltech.edu/img5/1996RXCD6.T...0000C/p083n22a:I:0.1-2.4keV:cps1996.fits.gz
     |===========================================|  96k/ 96k (100.00%)        03s
-    Downloading http://ned.ipac.caltech.edu/img5/1995RXCD3.T...0000C/p084n22a:I:0.1-2.4keV:cop1995.fits.gz
+    Downloading https://ned.ipac.caltech.edu/img5/1995RXCD3.T...0000C/p084n22a:I:0.1-2.4keV:cop1995.fits.gz
     |===========================================|  52k/ 52k (100.00%)        01s
-    Downloading http://ned.ipac.caltech.edu/img5/1998RXCD8.T...0000C/h083n22a:I:0.1-2.4keV:cps1998.fits.gz
+    Downloading https://ned.ipac.caltech.edu/img5/1998RXCD8.T...0000C/h083n22a:I:0.1-2.4keV:cps1998.fits.gz
     |===========================================|  35k/ 35k (100.00%)        00s
     >>> images  # doctest: +IGNORE_OUTPUT
     [[<astropy.io.fits.hdu.image.PrimaryHDU at 0x4311890>],
@@ -185,12 +184,12 @@ To get the URLs of the downloadable FITS images:
 
     >>> from astroquery.ipac.ned import Ned
     >>> image_list = Ned.get_image_list("m1")
-    >>> image_list  # doctest: +NORMALIZE_WHITESPACE
-    ['http://ned.ipac.caltech.edu/dss1B2/Bb/MESSIER_001:I:103aE:dss1.fits.gz',
-     'http://ned.ipac.caltech.edu/img/1995RXCD3.T...0000C/p084n22a:I:0.1-2.4keV:cop1995.fits.gz',
-     'http://ned.ipac.caltech.edu/img/1996RXCD6.T...0000C/p083n22a:I:0.1-2.4keV:cps1996.fits.gz',
-     'http://ned.ipac.caltech.edu/img/1998RXCD8.T...0000C/h083n22a:I:0.1-2.4keV:cps1998.fits.gz',
-     'http://ned.ipac.caltech.edu/img/1995RXCD3.T...0000C/p083n22a:I:0.1-2.4keV:cop1995.fits.gz']
+    >>> image_list  # doctest: +IGNORE_OUTPUT
+    ['https://ned.ipac.caltech.edu/dss1B2/Bb/MESSIER_001:I:103aE:dss1.fits.gz',
+     'https://ned.ipac.caltech.edu/img/1995RXCD3.T...0000C/p084n22a:I:0.1-2.4keV:cop1995.fits.gz',
+     'https://ned.ipac.caltech.edu/img/1996RXCD6.T...0000C/p083n22a:I:0.1-2.4keV:cps1996.fits.gz',
+     'https://ned.ipac.caltech.edu/img/1998RXCD8.T...0000C/h083n22a:I:0.1-2.4keV:cps1998.fits.gz',
+     'https://ned.ipac.caltech.edu/img/1995RXCD3.T...0000C/p083n22a:I:0.1-2.4keV:cop1995.fits.gz']
 
 
 Spectra can also be fetched in the same way:
@@ -199,11 +198,11 @@ Spectra can also be fetched in the same way:
 
     >>> from astroquery.ipac.ned import Ned
     >>> spectra = Ned.get_spectra('3c 273')  # doctest: +IGNORE_OUTPUT
-    Downloading http://ned.ipac.caltech.edu/spc1/2009A+A...495.1033B/3C_273:S:B:bcc2009.fits.gz
+    Downloading https://ned.ipac.caltech.edu/spc1/2009A+A...495.1033B/3C_273:S:B:bcc2009.fits.gz
     |===========================================| 7.8k/7.8k (100.00%)        00s
-    Downloading http://ned.ipac.caltech.edu/spc1/1992ApJS...80..109B/PG_1226+023:S:B_V:bg1992.fits.gz
+    Downloading https://ned.ipac.caltech.edu/spc1/1992ApJS...80..109B/PG_1226+023:S:B_V:bg1992.fits.gz
     |===========================================| 5.0k/5.0k (100.00%)        00s
-    Downloading http://ned.ipac.caltech.edu/spc1/2009A+A...495.1033B/3C_273:S:RI:bcc2009.fits.gz
+    Downloading https://ned.ipac.caltech.edu/spc1/2009A+A...495.1033B/3C_273:S:RI:bcc2009.fits.gz
     |===========================================| 9.4k/9.4k (100.00%)        00s
     >>> spectra  # doctest: +IGNORE_OUTPUT
     [[<astropy.io.fits.hdu.image.PrimaryHDU at 0x41b4190>],
@@ -218,9 +217,10 @@ Similarly the list of URLs for spectra of a particular object may be fetched:
     >>> from astroquery.ipac.ned import Ned
     >>> spectra_list = Ned.get_image_list("3c 273", item='spectra')
     >>> spectra_list
-    ['http://ned.ipac.caltech.edu/spc1/1992/1992ApJS...80..109B/PG_1226+023:S:B_V:bg1992.fits.gz',
-     'http://ned.ipac.caltech.edu/spc1/2009/2009A+A...495.1033B/3C_273:S:B:bcc2009.fits.gz',
-     'http://ned.ipac.caltech.edu/spc1/2009/2009A+A...495.1033B/3C_273:S:RI:bcc2009.fits.gz']
+    ['https://ned.ipac.caltech.edu/spc1/1992/1992ApJS...80..109B/PG_1226+023:S:B_V:bg1992.fits.gz',
+     'https://ned.ipac.caltech.edu/spc1/2009/2009A+A...495.1033B/3C_273:S:B:bcc2009.fits.gz',
+     ...
+     'https://ned.ipac.caltech.edu/spc1/2016/2016ApJS..226...19F/3C_273:S:CII158.3x3.fits.gz']
 
 
 Fetching other data tables for an object
@@ -236,7 +236,7 @@ for the specified object. We look at a simple example:
 
     >>> from astroquery.ipac.ned import Ned
     >>> result_table = Ned.get_table("3C 273", table='positions')
-    >>> print(result_table)
+    >>> print(result_table)  # doctest: +IGNORE_OUTPUT
     No.       RA       ... Published Frequence Mode         Qualifiers
                        ...
     --- -------------- ... ------------------------ -------------------------
@@ -244,12 +244,38 @@ for the specified object. We look at a simple example:
       1 12h29m06.7000s ...                                   Uncertain origin
       2 12h29m06.7000s ...                                   Uncertain origin
       3 12h29m06.7000s ...                                   Uncertain origin
+      4 12h29m06.7000s ...                                   Uncertain origin
+      5 12h29m06.7000s ...                                   Uncertain origin
+      6 12h29m06.7001s ...                                   Uncertain origin
+      7 12h29m06.6996s ...                                   Uncertain origin
+      8 12h29m06.7001s ...                                   Uncertain origin
+      9 12h29m06.7001s ...                                   Uncertain origin
     ...            ... ...                      ...                       ...
-    113    12h29m07.9s ...                                   Uncertain origin
-    114      12h29m04s ...                                   Uncertain origin
-    115      12h29m06s ...                                   Uncertain origin
-    116      12h29m08s ...                                   Uncertain origin
-    Length = 117 rows
+    144   12h29m06.05s ...   Broad-band measurement        From new, raw data
+    145    12h29m06.5s ...   Broad-band measurement        From new, raw data
+    146    12h29m06.5s ...   Broad-band measurement From reprocessed raw data
+    147    12h29m09.0s ...                                   Uncertain origin
+    148    12h29m08.9s ...                                   Uncertain origin
+    149    12h29m07.9s ...                                   Uncertain origin
+    150      12h29m04s ...                                   Uncertain origin
+    151      12h29m06s ...                                   Uncertain origin
+    152      12h29m08s ...                                   Uncertain origin
+    153      12h29m06s ...                                   Uncertain origin
+    Length = 154 rows
+
+
+Troubleshooting
+===============
+
+If you are repeatedly getting failed queries, or bad/out-of-date results, try clearing your cache:
+
+.. code-block:: python
+
+    >>> from astroquery.ipac.ned import Ned
+    >>> Ned.clear_cache()
+
+If this function is unavailable, upgrade your version of astroquery.
+The ``clear_cache`` function was introduced in version 0.4.7.dev8479.
 
 
 Reference/API
@@ -258,4 +284,4 @@ Reference/API
 .. automodapi:: astroquery.ipac.ned
     :no-inheritance-diagram:
 
-.. _IAU format: http://cdsweb.u-strasbg.fr/Dic/iau-spec.htx
+.. _IAU format: https://cds.unistra.fr/Dic/iau-spec.html

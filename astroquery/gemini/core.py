@@ -15,10 +15,9 @@ from astropy.table import Table, MaskedColumn
 from astroquery.gemini.urlhelper import URLHelper
 import numpy as np
 
-from ..query import BaseQuery, QueryWithLogin
+from ..query import QueryWithLogin
 from ..utils.class_or_instance import class_or_instance
 from . import conf
-from ..exceptions import AuthenticationWarning
 
 
 __all__ = ['Observations', 'ObservationsClass']  # specifies what to import
@@ -133,7 +132,7 @@ class ObservationsClass(QueryWithLogin):
         return True
 
     @class_or_instance
-    def query_region(self, coordinates, radius=0.3*units.deg):
+    def query_region(self, coordinates, *, radius=0.3*units.deg):
         """
         search for Gemini observations by target on the sky.
 
@@ -157,7 +156,7 @@ class ObservationsClass(QueryWithLogin):
         return self.query_criteria(coordinates=coordinates, radius=radius)
 
     @class_or_instance
-    def query_object(self, objectname, radius=0.3*units.deg):
+    def query_object(self, objectname, *, radius=0.3*units.deg):
         """
         search for Gemini observations by target on the sky.
 
@@ -463,67 +462,67 @@ def _gemini_json_to_table(json):
 
 
 __keys__ = ["exposure_time",
-        "detector_roi_setting",
-        "detector_welldepth_setting",
-        "telescope",
-        "mdready",
-        "requested_bg",
-        "engineering",
-        "cass_rotator_pa",
-        "ut_datetime",
-        "file_size",
-        "types",
-        "requested_wv",
-        "detector_readspeed_setting",
-        "size",
-        "laser_guide_star",
-        "observation_id",
-        "science_verification",
-        "raw_cc",
-        "filename",
-        "instrument",
-        "reduction",
-        "camera",
-        "ra",
-        "detector_binning",
-        "lastmod",
-        "wavelength_band",
-        "data_size",
-        "mode",
-        "raw_iq",
-        "airmass",
-        "elevation",
-        "data_label",
-        "requested_iq",
-        "object",
-        "requested_cc",
-        "program_id",
-        "file_md5",
-        "central_wavelength",
-        "raw_wv",
-        "compressed",
-        "filter_name",
-        "detector_gain_setting",
-        "path",
-        "observation_class",
-        "qa_state",
-        "observation_type",
-        "calibration_program",
-        "md5",
-        "adaptive_optics",
-        "name",
-        "focal_plane_mask",
-        "data_md5",
-        "raw_bg",
-        "disperser",
-        "wavefront_sensor",
-        "gcal_lamp",
-        "detector_readmode_setting",
-        "phot_standard",
-        "local_time",
-        "spectroscopy",
-        "azimuth",
-        "release",
-        "dec"]
+            "detector_roi_setting",
+            "detector_welldepth_setting",
+            "telescope",
+            "mdready",
+            "requested_bg",
+            "engineering",
+            "cass_rotator_pa",
+            "ut_datetime",
+            "file_size",
+            "types",
+            "requested_wv",
+            "detector_readspeed_setting",
+            "size",
+            "laser_guide_star",
+            "observation_id",
+            "science_verification",
+            "raw_cc",
+            "filename",
+            "instrument",
+            "reduction",
+            "camera",
+            "ra",
+            "detector_binning",
+            "lastmod",
+            "wavelength_band",
+            "data_size",
+            "mode",
+            "raw_iq",
+            "airmass",
+            "elevation",
+            "data_label",
+            "requested_iq",
+            "object",
+            "requested_cc",
+            "program_id",
+            "file_md5",
+            "central_wavelength",
+            "raw_wv",
+            "compressed",
+            "filter_name",
+            "detector_gain_setting",
+            "path",
+            "observation_class",
+            "qa_state",
+            "observation_type",
+            "calibration_program",
+            "md5",
+            "adaptive_optics",
+            "name",
+            "focal_plane_mask",
+            "data_md5",
+            "raw_bg",
+            "disperser",
+            "wavefront_sensor",
+            "gcal_lamp",
+            "detector_readmode_setting",
+            "phot_standard",
+            "local_time",
+            "spectroscopy",
+            "azimuth",
+            "release",
+            "dec"]
 
 Observations = ObservationsClass()

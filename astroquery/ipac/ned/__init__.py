@@ -32,7 +32,7 @@ class Conf(_config.ConfigNamespace):
     Configuration parameters for `astroquery.ipac.ned`.
     """
     server = _config.ConfigItem(
-        ['http://ned.ipac.caltech.edu/cgi-bin/'],
+        ['https://ned.ipac.caltech.edu/cgi-bin/'],
         'Name of the NED server to use.')
 
     timeout = _config.ConfigItem(
@@ -83,6 +83,4 @@ conf = Conf()
 
 from .core import Ned, NedClass
 
-__all__ = ['Ned', 'NedClass',
-           'Conf', 'conf',
-           ]
+__all__ = ['Ned', 'NedClass', 'Conf', 'conf']

@@ -1,34 +1,38 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """
-
-@author: Elena Colomo
-@contact: ecolomo@esa.int
+============================
+XMM-Newton Astroquery Module
+============================
 
 European Space Astronomy Centre (ESAC)
 European Space Agency (ESA)
 
-Created on 3 Sept 2019
-
-
 """
 import re
-from getpass import getpass
-from ...utils.tap.core import TapPlus
-from ...query import BaseQuery, QueryWithLogin
 import shutil
-import cgi
 from pathlib import Path
-import tarfile
+import tarfile as esatar
 import os
 import configparser
+from email.message import Message
 
 from astropy.io import fits
-from . import conf
 from astroquery import log
 from astropy.coordinates import SkyCoord
+
+from . import conf
 from ...exceptions import LoginError
+from ...utils.tap.core import TapPlus
+from ...query import BaseQuery, QueryWithLogin
+
 
 __all__ = ['XMMNewton', 'XMMNewtonClass']
+
+
+# We do trust the ESA tar files, this is to avoid the new to Python 3.12 deprecation warning
+# https://docs.python.org/3.12/library/tarfile.html#tarfile-extraction-filter
+if hasattr(esatar, "fully_trusted_filter"):
+    esatar.TarFile.extraction_filter = staticmethod(esatar.fully_trusted_filter)
 
 
 class XMMNewtonClass(BaseQuery):
@@ -38,7 +42,7 @@ class XMMNewtonClass(BaseQuery):
     TIMEOUT = conf.TIMEOUT
 
     def __init__(self, tap_handler=None):
-        super(XMMNewtonClass, self).__init__()
+        super().__init__()
         self.configuration = configparser.ConfigParser()
 
         if tap_handler is None:
@@ -100,6 +104,9 @@ class XMMNewtonClass(BaseQuery):
         extension : string
             file format, optional, by default all formats
             values: ASC, ASZ, FTZ, HTM, IND, PDF, PNG
+        cache : bool
+            Defaults to True. If set overrides global caching behavior.
+            See :ref:`caching documentation <astroquery_cache>`.
 
         Returns
         -------
@@ -184,8 +191,8 @@ class XMMNewtonClass(BaseQuery):
         if filename is None:
             response = self._request('HEAD', link)
             response.raise_for_status()
-            filename = re.findall('filename="(.+)"', response.headers[
-                "Content-Disposition"])[0]
+            filename = os.path.basename(re.findall('filename="(.+)"', response.headers[
+                "Content-Disposition"])[0])
         else:
             filename = observation_id + ".png"
 
@@ -295,7 +302,9 @@ class XMMNewtonClass(BaseQuery):
         response = self._request('HEAD', link, save=False, cache=cache)
         # Get original extension
         if 'Content-Type' in response.headers and 'text' not in response.headers['Content-Type']:
-            _, params = cgi.parse_header(response.headers['Content-Disposition'])
+            message = Message()
+            message["content-type"] = response.headers["Content-Disposition"]
+            params = dict(message.get_params()[1:])
         elif response.status_code == 401:
             error = "Data protected by proprietary rights. Please check your credentials"
             raise LoginError(error)
@@ -318,7 +327,7 @@ class XMMNewtonClass(BaseQuery):
 
     def _create_filename(self, filename, observation_id, suffixes):
         if filename is not None:
-            filename = os.path.splitext(filename)[0]
+            filename = os.path.basename(os.path.splitext(filename)[0])
         else:
             filename = observation_id
         filename += "".join(suffixes)
@@ -389,8 +398,16 @@ class XMMNewtonClass(BaseQuery):
         as this is the convention used by the pipeline.
         The structure and the content of the extracted compressed FITS files
         are described in details in the Pipeline Products Description
-        [XMM-SOC-GEN-ICD-0024](https://xmm-tools.cosmos.esa.int/external/xmm_obs_info/odf/data/docs/XMM-SOC-GEN-ICD-0024.pdf).
+        [XMM-SOC-GEN-ICD-0024]
+        (https://xmm-tools.cosmos.esa.int/external/xmm_obs_info/odf/data/docs/XMM-SOC-GEN-ICD-0024.pdf).
 
+        The RMF to be used for the spectral analysis should be generated with the same PPS version as the spectrum,
+        background and ARF. The PPS version can be found in SASVERS keyword in the SPECTRUM file, characters [-6:-3].
+        Once the sas version is determined, the code should look for the proper version of RMF in the FTP tree.
+        However, for the current PPS versions available in the archive, i.e v18.0, v19.0, v20.0 and v21.0,
+        all RMF matrices are equal among the versions and for all instruments, so it is possible to download the last
+        one, v21.0, available in the root FTP stored in 'rmf_ftp'. In the future, the FTP tree and/or PPS keywords will
+        be modified to make it easier to download the appropriate RMF file for each spectrum.
         """
         _instrument = ["M1", "M2", "PN", "EP"]
         _product_type = ["SRSPEC", "BGSPEC", "SRCARF"]
@@ -406,9 +423,9 @@ class XMMNewtonClass(BaseQuery):
         if path != "" and os.path.exists(path):
             _path = path
         try:
-            with tarfile.open(filename, "r") as tar:
+            with esatar.open(filename, "r") as tar:
                 ret = {}
-                for member in tar.getmembers():
+                for member in [x for x in tar.getmembers() if not x.name.lower().endswith('png')]:
                     paths = os.path.split(member.name)
                     fname = paths[1]
                     paths = os.path.split(paths[0])
@@ -441,7 +458,7 @@ class XMMNewtonClass(BaseQuery):
                                 elif fname_info["I"] == "PN":
                                     inst = "PN/"
                                     file_name, file_ext = os.path.splitext(rmf_fname)
-                                    rmf_fname = file_name + "_v18.0" + file_ext
+                                    rmf_fname = file_name + "_v21.0" + file_ext
 
                                 link = self._rmf_ftp + inst + rmf_fname
 
@@ -552,7 +569,7 @@ class XMMNewtonClass(BaseQuery):
                     log.warning("Invalid instrument %s" % inst)
                     instrument.remove(inst)
         try:
-            with tarfile.open(filename, "r") as tar:
+            with esatar.open(filename, "r") as tar:
                 ret = {}
                 for member in tar.getmembers():
                     paths = os.path.split(member.name)
@@ -728,7 +745,7 @@ class XMMNewtonClass(BaseQuery):
             _path = path
 
         try:
-            with tarfile.open(filename, "r") as tar:
+            with esatar.open(filename, "r") as tar:
                 ret = {}
                 for member in tar.getmembers():
                     paths = os.path.split(member.name)

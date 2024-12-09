@@ -13,7 +13,7 @@ from astropy.utils.decorators import deprecated
 __doctest_skip__ = ['VamdcClass.*']
 
 
-@deprecated('0.4.2', 'the module relies on an unmaintained library and is'
+@deprecated('0.4.2', 'the vamdc astroquery module relies on an unmaintained library and is'
             'considered deprecated until completely refactored or upstream'
             'is stablised.')
 @async_to_sync
@@ -23,7 +23,7 @@ class VamdcClass(BaseQuery):
     CACHE_LOCATION = conf.cache_location
 
     def __init__(self, doimport=True):
-        super(VamdcClass, self).__init__()
+        super().__init__()
 
         if not doimport:
             # this is a hack to allow the docstrings to be produced without

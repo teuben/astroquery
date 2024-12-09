@@ -1,5 +1,6 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
+from typing import Union
 import warnings
 from io import StringIO, BytesIO
 from astropy.table import Table
@@ -13,6 +14,13 @@ from ..exceptions import InvalidQueryError, NoResultsWarning
 from . import conf
 
 __all__ = ['Heasarc', 'HeasarcClass']
+
+
+def Table_read(*args, **kwargs):
+    if commons.ASTROPY_LT_5_1:
+        return Table.read(*args, **kwargs)
+    else:
+        return Table.read(*args, **kwargs, unit_parse_strict='silent')
 
 
 @async_to_sync
@@ -29,10 +37,13 @@ class HeasarcClass(BaseQuery):
     TIMEOUT = conf.timeout
     coord_systems = ['fk5', 'fk4', 'equatorial', 'galactic']
 
-    def query_async(self, request_payload, cache=True, url=None):
+    def query_async(self, request_payload, *, cache=True, url=None):
         """
         Submit a query based on a given request_payload. This allows detailed
         control of the query to be submitted.
+
+        cache (bool) defaults to True. If set overrides global caching behavior.
+        See :ref:`caching documentation <astroquery_cache>`.
         """
 
         if url is None:
@@ -42,9 +53,12 @@ class HeasarcClass(BaseQuery):
                                  timeout=self.TIMEOUT, cache=cache)
         return response
 
-    def query_mission_list(self, cache=True, get_query_payload=False):
+    def query_mission_list(self, *, cache=True, get_query_payload=False):
         """
         Returns a list of all available mission tables with descriptions
+
+        cache (bool) defaults to True. If set overrides global caching behavior.
+        See :ref:`caching documentation <astroquery_cache>`.
         """
         request_payload = self._args_to_payload(
             entry='none',
@@ -68,7 +82,7 @@ class HeasarcClass(BaseQuery):
                            data_start=3, data_end=-1)
         return table
 
-    def query_mission_cols(self, mission, cache=True, get_query_payload=False,
+    def query_mission_cols(self, mission, *, cache=True, get_query_payload=False,
                            **kwargs):
         """
         Returns a list containing the names of columns that can be returned for
@@ -83,11 +97,16 @@ class HeasarcClass(BaseQuery):
             * Standard      : Return default table columns
             * All (default) : Return all table columns
             * <custom>      : User defined csv list of columns to be returned
+        cache : bool, optional
+            Defaults to True. If set overrides global caching behavior.
+            See :ref:`caching documentation <astroquery_cache>`.
         All other parameters have no effect
         """
 
-        response = self.query_region_async(position='0.0 0.0', mission=mission,
-                                           radius='361 degree', cache=cache,
+        response = self.query_region_async(position=coordinates.SkyCoord(10, 10, unit='deg', frame='fk5'),
+                                           mission=mission,
+                                           radius='361 degree',
+                                           cache=cache,
                                            get_query_payload=get_query_payload,
                                            resultsmax=1,
                                            fields='All')
@@ -98,7 +117,7 @@ class HeasarcClass(BaseQuery):
 
         return self._parse_result(response).colnames
 
-    def query_object_async(self, object_name, mission,
+    def query_object_async(self, object_name, mission, *,
                            cache=True, get_query_payload=False,
                            **kwargs):
         """
@@ -111,6 +130,9 @@ class HeasarcClass(BaseQuery):
             parameter.
         mission : str
             Mission table to search from
+        cache : bool
+            Defaults to True. If set overrides global caching behavior.
+            See :ref:`caching documentation <astroquery_cache>`.
         **kwargs :
             see `~astroquery.heasarc.HeasarcClass._args_to_payload` for list
             of additional parameters that can be used to refine search query
@@ -127,8 +149,8 @@ class HeasarcClass(BaseQuery):
 
         return self.query_async(request_payload, cache=cache)
 
-    def query_region_async(self, position, mission, radius,
-                           cache=True, get_query_payload=False,
+    def query_region_async(self, position: Union[coordinates.SkyCoord, str],
+                           mission, radius, *, cache=True, get_query_payload=False,
                            **kwargs):
         """
         Query around specific set of coordinates within a given mission
@@ -138,7 +160,7 @@ class HeasarcClass(BaseQuery):
 
         Parameters
         ----------
-        position : `astropy.coordinates` or str
+        position : `astropy.coordinates.SkyCoord` or str
             The position around which to search. It may be specified as a
             string in which case it is resolved using online services or as
             the appropriate `astropy.coordinates` object. ICRS coordinates
@@ -149,6 +171,9 @@ class HeasarcClass(BaseQuery):
         radius :
             Astropy Quantity object, or a string that can be parsed into one.
             e.g., '1 degree' or 1*u.degree.
+        cache : bool
+            Defaults to True. If set overrides global caching behavior.
+            See :ref:`caching documentation <astroquery_cache>`.
         **kwargs :
             see `~astroquery.heasarc.HeasarcClass._args_to_payload` for list
             of additional parameters that can be used to refine search query
@@ -159,9 +184,11 @@ class HeasarcClass(BaseQuery):
         kwargs['equinox'] = 2000
 
         # Generate the request
+        # Fixed string representation of coordinates ensures that request payload
+        # does not depend on python/astropy version for the same input coordinates
         request_payload = self._args_to_payload(
             mission=mission,
-            entry="{},{}".format(c.ra.degree, c.dec.degree),
+            entry=f"{c.ra.degree:.10f},{c.dec.degree:.10f}",
             radius=u.Quantity(radius),
             **kwargs
         )
@@ -176,19 +203,19 @@ class HeasarcClass(BaseQuery):
     def _old_w3query_fallback(self, content):
         # old w3query (such as that used in ISDC) return very strange fits, with all ints
 
-        f = fits.open(BytesIO(content))
+        fits_content = fits.open(BytesIO(content))
 
-        for c in f[1].columns:
-            if c.disp is not None:
-                c.format = c.disp
+        for col in fits_content[1].columns:
+            if col.disp is not None:
+                col.format = col.disp
             else:
-                c.format = str(c.format).replace("I", "A")
+                col.format = str(col.format).replace("I", "A")
 
-        I = BytesIO()
-        f.writeto(I)
-        I.seek(0)
+        tmp_out = BytesIO()
+        fits_content.writeto(tmp_out)
+        tmp_out.seek(0)
 
-        return Table.read(I)
+        return Table_read(tmp_out)
 
     def _fallback(self, text):
         """
@@ -218,18 +245,31 @@ class HeasarcClass(BaseQuery):
             new_table.append("".join(newline))
 
         data = StringIO(text.replace(old_table, "\n".join(new_table)))
-        return Table.read(data, hdu=1)
 
-    def _parse_result(self, response, verbose=False):
+        return Table_read(data, hdu=1)
+
+    def _blank_table_fallback(self, data):
+        """
+        In late 2022, we started seeing examples where the null result came
+        back as a FITS file with an ImageHDU and no BinTableHDU.
+        """
+        with fits.open(data) as fh:
+            comments = fh[1].header['COMMENT']
+        emptytable = Table()
+        emptytable.meta['COMMENT'] = comments
+        warnings.warn(NoResultsWarning("No matching rows were found in the query."))
+        return emptytable
+
+    def _parse_result(self, response, *, verbose=False):
         # if verbose is False then suppress any VOTable related warnings
         if not verbose:
             commons.suppress_vo_warnings()
 
         if "BATCH_RETRIEVAL_MSG ERROR:" in response.text:
             raise InvalidQueryError("One or more inputs is not recognized by HEASARC. "
-                             "Check that the object name is in GRB, SIMBAD+Sesame, or "
-                             "NED format and that the mission name is as listed in "
-                             "query_mission_list().")
+                                    "Check that the object name is in GRB, SIMBAD+Sesame, or "
+                                    "NED format and that the mission name is as listed in "
+                                    "query_mission_list().")
         elif "Software error:" in response.text:
             raise InvalidQueryError("Unspecified error from HEASARC database. "
                                     "\nCheck error message: \n{!s}".format(response.text))
@@ -237,14 +277,17 @@ class HeasarcClass(BaseQuery):
             warnings.warn(NoResultsWarning("No matching rows were found in the query."))
             return Table()
 
+        if "XTENSION= 'IMAGE   '" in response.text:
+            data = BytesIO(response.content)
+            return self._blank_table_fallback(data)
+
         try:
             data = BytesIO(response.content)
-            table = Table.read(data, hdu=1)
-            return table
+            return Table_read(data, hdu=1)
         except ValueError:
             try:
                 return self._fallback(response.text)
-            except Exception as e:
+            except Exception:
                 return self._old_w3query_fallback(response.content)
 
     def _args_to_payload(self, **kwargs):
@@ -294,7 +337,8 @@ class HeasarcClass(BaseQuery):
         action : str, optional
             Type of action to be taken (defaults to 'Query')
         """
-        # User-facing parameters are lower case, while parameters as passed to the HEASARC service are capitalized according to the HEASARC requirements.
+        # User-facing parameters are lower case, while parameters as passed to the
+        # HEASARC service are capitalized according to the HEASARC requirements.
         # The necessary transformations are done in this function.
 
         # Define the basic query for this object
@@ -372,10 +416,7 @@ class HeasarcClass(BaseQuery):
                 if k.lower() in mission_fields:
                     request_payload['bparam_' + k.lower()] = v
                 else:
-                    raise ValueError("unknown parameter '{}' provided, must be one of {!s}".format(
-                                      k,
-                                      mission_fields,
-                                    ))
+                    raise ValueError(f"unknown parameter '{k}' provided, must be one of {mission_fields}")
 
         return request_payload
 

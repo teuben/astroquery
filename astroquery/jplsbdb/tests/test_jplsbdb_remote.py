@@ -33,8 +33,8 @@ class TestSBDBClass:
         sbdb = SBDB.query('Apophis', id_type='search',
                           close_approach=True)
 
-        assert (sbdb['ca_data']['jd'].shape[0] > 0 and
-                len(sbdb['ca_data']['jd'].shape) == 1)
+        assert (sbdb['ca_data']['jd'].shape[0] > 0
+                and len(sbdb['ca_data']['jd'].shape) == 1)
 
     def test_units(self):
         sbdb = SBDB.query('Apophis', id_type='search',
@@ -44,3 +44,6 @@ class TestSBDBClass:
         assert sbdb['orbit']['model_pars']['A2'].unit.bases == [u.au, u.d]
         assert sbdb['orbit']['model_pars']['A2'].unit.is_equivalent(u.au / u.d**2)
         assert sbdb['orbit']['elements']['tp'].unit.bases[0] == u.d
+
+        sbdb = SBDB.query('Bennu', id_type='search', phys=True)
+        assert sbdb['phys_par']['I'].unit == u.Unit('J / (K m2 s(1/2))')

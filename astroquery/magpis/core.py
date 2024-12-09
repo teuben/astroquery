@@ -33,7 +33,7 @@ class MagpisClass(BaseQuery):
                "bolocam"]
     maximsize = 1024
 
-    def _args_to_payload(self, coordinates, image_size=1 * u.arcmin,
+    def _args_to_payload(self, coordinates, *, image_size=1 * u.arcmin,
                          survey='bolocam', maximsize=None):
         """
         Fetches image cutouts from MAGPIS surveys.
@@ -71,7 +71,7 @@ class MagpisClass(BaseQuery):
         return request_payload
 
     @prepend_docstr_nosections("\n" + _args_to_payload.__doc__)
-    def get_images(self, coordinates, image_size=1 * u.arcmin,
+    def get_images(self, coordinates, *, image_size=1 * u.arcmin,
                    survey='bolocam', get_query_payload=False):
         """
         get_query_payload : bool, optional
@@ -90,11 +90,11 @@ class MagpisClass(BaseQuery):
         content_buffer = BytesIO(response.content)
         try:
             return fits.open(content_buffer, ignore_missing_end=True)
-        except IOError:
+        except OSError:
             raise InvalidQueryError(response.content)
 
     @prepend_docstr_nosections("\n" + _args_to_payload.__doc__)
-    def get_images_async(self, coordinates, image_size=1 * u.arcmin,
+    def get_images_async(self, coordinates, *, image_size=1 * u.arcmin,
                          survey='bolocam', get_query_payload=False):
         """
         get_query_payload : bool, optional
@@ -107,14 +107,14 @@ class MagpisClass(BaseQuery):
             The HTTP response returned from the service
         """
         if survey not in self.surveys:
-            raise InvalidQueryError("Survey must be one of " +
-                                    (",".join(self.list_surveys())))
+            raise InvalidQueryError("Survey must be one of "
+                                    + (",".join(self.list_surveys())))
         request_payload = self._args_to_payload(
             coordinates, image_size=image_size, survey=survey)
         if get_query_payload:
             return request_payload
         response = self._request("POST", url=self.URL, data=request_payload,
-                                 timeout=self.TIMEOUT, verify=False)
+                                 timeout=self.TIMEOUT)
         return response
 
     def list_surveys(self):

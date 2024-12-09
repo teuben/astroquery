@@ -5,7 +5,7 @@ from io import BytesIO
 from collections import namedtuple
 from xml.dom.minidom import parseString
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import astropy.units as u
 import astropy.coordinates as coord
@@ -40,7 +40,7 @@ class NedClass(BaseQuery):
                       2: Options('Data as Published', 'pub'),
                       3: Options('Homogenized Units (mJy)', 'mjy')}
 
-    def query_object(self, object_name, get_query_payload=False,
+    def query_object(self, object_name, *, get_query_payload=False,
                      verbose=False):
         """
         Queries objects by name from the NED Service and returns the Main
@@ -71,7 +71,7 @@ class NedClass(BaseQuery):
         result = self._parse_result(response, verbose=verbose)
         return result
 
-    def query_object_async(self, object_name, get_query_payload=False):
+    def query_object_async(self, object_name, *, get_query_payload=False):
         """
         Serves the same purpose as `~NedClass.query_object` but returns the
         raw HTTP response rather than the `astropy.table.Table` object.
@@ -101,7 +101,7 @@ class NedClass(BaseQuery):
 
         return response
 
-    def query_region(self, coordinates, radius=1 * u.arcmin, equinox='J2000.0',
+    def query_region(self, coordinates, *, radius=1 * u.arcmin, equinox='J2000.0',
                      get_query_payload=False, verbose=False):
         """
         Used to query a region around a known identifier or given
@@ -144,7 +144,7 @@ class NedClass(BaseQuery):
         result = self._parse_result(response, verbose=verbose)
         return result
 
-    def query_region_async(self, coordinates, radius=1 * u.arcmin,
+    def query_region_async(self, coordinates, *, radius=1 * u.arcmin,
                            equinox='J2000.0', get_query_payload=False):
         """
         Serves the same purpose as `~NedClass.query_region` but returns the
@@ -206,7 +206,7 @@ class NedClass(BaseQuery):
                                  params=request_payload, timeout=Ned.TIMEOUT)
         return response
 
-    def query_region_iau(self, iau_name, frame='Equatorial', equinox='B1950.0',
+    def query_region_iau(self, iau_name, *, frame='Equatorial', equinox='B1950.0',
                          get_query_payload=False, verbose=False):
         """
         Used to query the Ned service via the IAU name. Equivalent to the
@@ -217,7 +217,7 @@ class NedClass(BaseQuery):
         iau_name : str
             IAU coordinate-based name of target on which search is
             centered. Definition of IAU coordinates at
-            http://cdsweb.u-strasbg.fr/Dic/iau-spec.html.
+            https://cds.unistra.fr/Dic/iau-spec.html.
         frame : str, optional
             May be one of 'Equatorial', 'Ecliptic', 'Galactic',
             'SuperGalactic'.  Defaults to 'Equatorial'.
@@ -245,7 +245,7 @@ class NedClass(BaseQuery):
         result = self._parse_result(response, verbose=verbose)
         return result
 
-    def query_region_iau_async(self, iau_name, frame='Equatorial',
+    def query_region_iau_async(self, iau_name, *, frame='Equatorial',
                                equinox='B1950.0', get_query_payload=False):
         """
         Serves the same purpose as `~NedClass.query_region_iau` but returns
@@ -256,7 +256,7 @@ class NedClass(BaseQuery):
         iau_name : str
             IAU coordinate-based name of target on which search is
             centered. Definition of IAU coordinates at
-            http://cdsweb.u-strasbg.fr/Dic/iau-spec.html.
+            https://cds.unistra.fr/Dic/iau-spec.html.
         frame : str, optional
             May be one of 'Equatorial', 'Ecliptic', 'Galactic',
             'SuperGalactic'.  Defaults to 'Equatorial'.
@@ -285,7 +285,7 @@ class NedClass(BaseQuery):
                                  params=request_payload, timeout=Ned.TIMEOUT)
         return response
 
-    def query_refcode(self, refcode, get_query_payload=False, verbose=False):
+    def query_refcode(self, refcode, *, get_query_payload=False, verbose=False):
         """
         Used to retrieve all objects contained in a particular
         reference. Equivalent to by refcode queries of the web interface.
@@ -314,7 +314,7 @@ class NedClass(BaseQuery):
         result = self._parse_result(response, verbose=verbose)
         return result
 
-    def query_refcode_async(self, refcode, get_query_payload=False):
+    def query_refcode_async(self, refcode, *, get_query_payload=False):
         """
         Serves the same purpose as `~NedClass.query_region` but returns the
         raw HTTP response rather than the `astropy.table.Table` object.
@@ -344,7 +344,7 @@ class NedClass(BaseQuery):
                                  params=request_payload, timeout=Ned.TIMEOUT)
         return response
 
-    def get_images(self, object_name, get_query_payload=False,
+    def get_images(self, object_name, *, get_query_payload=False,
                    show_progress=True):
         """
         Query function to fetch FITS images for a given identifier.
@@ -370,7 +370,7 @@ class NedClass(BaseQuery):
             return readable_objs
         return [obj.get_fits() for obj in readable_objs]
 
-    def get_images_async(self, object_name, get_query_payload=False,
+    def get_images_async(self, object_name, *, get_query_payload=False,
                          show_progress=True):
         """
         Serves the same purpose as `~NedClass.get_images` but returns
@@ -397,7 +397,7 @@ class NedClass(BaseQuery):
                                       show_progress=show_progress)
                 for U in image_urls]
 
-    def get_spectra(self, object_name, get_query_payload=False,
+    def get_spectra(self, object_name, *, get_query_payload=False,
                     show_progress=True):
         """
         Query function to fetch FITS files of spectra for a given identifier.
@@ -423,7 +423,7 @@ class NedClass(BaseQuery):
             return readable_objs
         return [obj.get_fits() for obj in readable_objs]
 
-    def get_spectra_async(self, object_name, get_query_payload=False,
+    def get_spectra_async(self, object_name, *, get_query_payload=False,
                           show_progress=True):
         """
         Serves the same purpose as `~NedClass.get_spectra` but returns
@@ -490,7 +490,7 @@ class NedClass(BaseQuery):
                                  timeout=Ned.TIMEOUT)
         return self._extract_image_urls(response.text, file_format=file_format)
 
-    def _extract_image_urls(self, html_in, file_format='fits'):
+    def _extract_image_urls(self, html_in, *, file_format='fits'):
         """
         Helper function that uses regexps to extract the image urls from the
         given HTML.
@@ -505,7 +505,7 @@ class NedClass(BaseQuery):
             Other options available: 'author-ascii', 'NED-ascii', 'VO-table'.
 
         """
-        base_url = 'http://ned.ipac.caltech.edu'
+        base_url = 'https://ned.ipac.caltech.edu'
 
         extensions = {'fits': 'fits.gz',
                       'author-ascii': 'txt',
@@ -524,7 +524,7 @@ class NedClass(BaseQuery):
         url_list = [base_url + img_url for img_url in matched_urls]
         return url_list
 
-    def get_table(self, object_name, table='photometry',
+    def get_table(self, object_name, *, table='photometry',
                   get_query_payload=False, verbose=False, **kwargs):
         """
         Fetches the specified data table for the object from NED and returns
@@ -574,7 +574,7 @@ class NedClass(BaseQuery):
         result = self._parse_result(response, verbose=verbose)
         return result
 
-    def get_table_async(self, object_name, table='photometry',
+    def get_table_async(self, object_name, *, table='photometry',
                         get_query_payload=False, **kwargs):
         """
         Serves the same purpose as `~NedClass.query_region` but returns the
@@ -625,7 +625,7 @@ class NedClass(BaseQuery):
                 'yes' if kwargs.get('extended_search') else 'no')
             request_payload['begin_year'] = kwargs.get('from_year', 1800)
             request_payload['end_year'] = kwargs.get('to_year',
-                                                     datetime.now().year)
+                                                     datetime.now(timezone.utc).year)
         if get_query_payload:
             return request_payload
         response = self._request("GET", url=Ned.DATA_SEARCH_URL,
@@ -678,7 +678,7 @@ class NedClass(BaseQuery):
         request_payload['out_equinox'] = conf.output_equinox
         request_payload['obj_sort'] = conf.sort_output_by
 
-    def _parse_result(self, response, verbose=False):
+    def _parse_result(self, response, *, verbose=False):
         """
         Parses the raw HTTP response and returns it as an
         `astropy.table.Table`.

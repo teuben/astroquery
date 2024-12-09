@@ -55,7 +55,7 @@ class Or(And):
 
 class Use:
 
-    def __init__(self, callable_, error=None):
+    def __init__(self, callable_, *, error=None):
         assert callable(callable_)
         self._callable = callable_
         self._error = error
@@ -97,7 +97,7 @@ def priority(s):
 
 class Schema:
 
-    def __init__(self, schema, error=None):
+    def __init__(self, schema, *, error=None):
         self._schema = schema
         self._error = error
 
@@ -140,8 +140,7 @@ class Schema:
                     new[nkey] = nvalue
                 elif skey is not None:
                     if x is not None:
-                        raise SchemaError([f'key {key!r} is required'] +
-                                          x.autos, [e] + x.errors)
+                        raise SchemaError([f'key {key!r} is required'] + x.autos, [e] + x.errors)
                     else:
                         raise SchemaError(f'key {skey!r} is required', e)
             coverage = set(k for k in coverage if type(k) is not Optional)
