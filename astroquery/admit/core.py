@@ -25,7 +25,7 @@ from ..alma.tapsql import (
     _gen_pol_sql,
     _gen_pub_sql,
     _gen_science_sql,
-    _gen_spec_res_sql,
+    #_gen_spec_res_sql,
     _val_parse,
     ALMA_DATE_FORMAT,
 )
@@ -113,6 +113,38 @@ def _gen_str_sql_escape(field, value):
     else:
         return result
 
+# this was removed from alma/tapsql.py in https://github.com/teuben/astroquery/commit/ac59149e671516650435b7ca092908f8485e49d4
+# but we still need it.
+def _gen_spec_res_sql(field, value):
+    # This needs special treatment because spectral_resolution in AQ is in
+    # KHz while corresponding em_resolution is in m
+    result = ''
+    for interval in _val_parse(value):
+        if result:
+            result += ' OR '
+        if isinstance(interval, tuple):
+            min_val, max_val = interval
+            if max_val is None:
+                result += "{}<={}".format(
+                    field,
+                    min_val*u.kHz.to(u.m, equivalencies=u.spectral()))
+            elif min_val is None:
+                result += "{}>={}".format(
+                    field,
+                    max_val*u.kHz.to(u.m, equivalencies=u.spectral()))
+            else:
+                result += "({1}<={0} AND {0}<={2})".format(
+                    field,
+                    max_val*u.kHz.to(u.m, equivalencies=u.spectral()),
+                    min_val*u.kHz.to(u.m, equivalencies=u.spectral()))
+        else:
+            result += "{}={}".format(
+                field, interval*u.kHz.to(u.m, equivalencies=u.spectral()))
+    if ' OR ' in result:
+        # use brackets for multiple ORs
+        return '(' + result + ')'
+    else:
+        return result
 
 # This mimics the ALMA_FORM_KEYS in alma/core.py.  The assumption here is
 # that there is a web form in front of this.  We don't have it for ADMIT, but
@@ -816,6 +848,7 @@ class ADMITClass(BaseQuery):
             return "(" + result + ")"
         else:
             return result
+
 
 
 # ------------------------------------------------------------------
